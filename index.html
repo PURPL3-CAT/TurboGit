@@ -1,0 +1,72 @@
+<script src="https://unpkg.com/@isomorphic-git/lightning-fs"></script>
+<script src="https://unpkg.com/isomorphic-git@1.34"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script type="module" src="script.js"></script>
+<link rel="stylesheet" href="styles.css" />
+
+<div class="app">
+  <h3>Isomorphic-Git Editor</h3>
+
+  <div class="actions">
+    <button id="initBtn">Init</button>
+    <button id="commitBtn">Commit All</button>
+    <button id="clearBtn">Clear All</button>
+    <button id="nukeGitBtn" style="background: #c0392b">Nuke .git</button>
+
+    <div
+      style="border-left: 1px solid #444; padding-left: 10px; margin-left: 10px;"
+    >
+      <button id="openFolderBtn">📂 Open Folder</button>
+      <button id="loadFauxBtn">📤 Load Fauxbundle</button>
+      <button id="saveFauxBtn">📥 Save Fauxbundle</button>
+    </div>
+  </div>
+
+  <div class="editor-container">
+    <!-- Combined Sidebar with Tabs -->
+    <div id="sidebar">
+      <div class="tabs">
+        <button id="tabExplorer" class="active">Files</button>
+        <button id="tabGit">Git Menu</button>
+      </div>
+
+      <!-- Explorer View -->
+      <div id="viewExplorer">
+        <div class="explorer-header">
+          <button id="newFileBtn">📄+</button>
+          <button id="newFolderBtn">📁+</button>
+          <button id="refreshBtn">🔄</button>
+        </div>
+        <ul id="fileList"></ul>
+      </div>
+
+      <!-- Git View (New) -->
+      <div id="viewGit" style="display: none">
+        <div class="git-section">
+          <strong>Branch: <span id="currentBranch">...</span></strong>
+          <button id="refreshGitBtn">Refresh Status</button>
+        </div>
+        <div class="git-section">
+          <strong>Changes:</strong>
+          <ul id="gitStatusList"></ul>
+        </div>
+        <div class="git-section">
+          <strong>Log:</strong>
+          <ul id="gitLogList"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Editor -->
+    <div id="editor">
+      <input type="text" id="fileName" placeholder="file.txt" />
+      <textarea id="fileContent"></textarea>
+      <div class="editor-actions">
+        <button id="saveBtn">Save</button>
+        <button id="deleteBtn" style="background: #e74c3c">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <pre id="log">Status: Ready</pre>
+</div>
