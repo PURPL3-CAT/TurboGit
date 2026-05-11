@@ -223,14 +223,29 @@ async function pullFromFolder(vm) {
     );
 
     if (existing) {
-      console.log("Replacing existing VM sprite:", spriteName);
-      vm.deleteSprite(existing.id);
+      if (spriteName === "Stage") {
+        console.log("Mutating Stage instead of deleting it");
+
+        // Replace blocks
+        existing.sprite.blocks._blocks = blocks;
+        existing.sprite.blocks._scripts = scripts;
+
+        // Replace costumes
+        existing.sprite.costumes.length = 0;
+        for (const c of costumes) existing.sprite.costumes.push(c);
+
+        // Replace sounds
+        existing.sprite.sounds.length = 0;
+        for (const s of sounds) existing.sprite.sounds.push(s);
+      } else {
+        console.log("Replacing existing VM sprite:", spriteName);
+        vm.deleteSprite(existing.id);
+        await vm.addSprite(targetJSON);
+      }
+    } else {
+      await vm.addSprite(targetJSON);
     }
 
-    //
-    // === ADD NEW SPRITE ===
-    //
-    await vm.addSprite(targetJSON);
     console.log("Loaded:", spriteName);
   }
 
