@@ -124,13 +124,11 @@ async function pullFromFolder(vm) {
       vm.deleteSprite(target.id);
     }
   }
-
   //
   // === LOAD OR RELOAD SPRITES FROM DISK ===
   //
   for (const { name: spriteName, handle: spriteDir } of folderSprites) {
     console.log("Loading sprite:", spriteName);
-
     //
     // === LOAD BLOCKS ===
     //
@@ -144,20 +142,30 @@ async function pullFromFolder(vm) {
     const costumeMeta = JSON.parse(
       await readTextFile(costumesDir, "costumes.json"),
     );
-
     const costumes = [];
     for (const meta of costumeMeta) {
       const filename = `${meta.name}.${meta.dataFormat}`;
       const data = await readBinaryFile(costumesDir, filename);
-
       const assetId = await md5(data);
+
+      // Convert Uint8Array to string for SVGs (VM expects string data for SVG assets)
+      let assetData;
+      if (meta.dataFormat === "svg") {
+        assetData = new TextDecoder().decode(data);
+      } else {
+        assetData = data;
+      }
 
       costumes.push({
         assetId,
+        md5ext: `${assetId}.${meta.dataFormat}`,
         dataFormat: meta.dataFormat,
         name: meta.name,
         rotationCenterX: meta.rotationCenterX,
         rotationCenterY: meta.rotationCenterY,
+        asset: { data: assetData },
+        bitmapResolution:
+          meta.bitmapResolution || (meta.dataFormat === "svg" ? 1 : 2),
       });
     }
 
@@ -241,6 +249,18 @@ async function pullFromFolder(vm) {
         console.log("Replacing existing VM sprite:", spriteName);
         vm.deleteSprite(existing.id);
         await vm.addSprite(targetJSON);
+
+        // Patch assets onto the newly added sprite's costumes
+        const added = vm.runtime.targets.find(
+          (t) => t.isOriginal && t.sprite.name === spriteName,
+        );
+        if (added) {
+          added.sprite.costumes.forEach((costume, i) => {
+            if (costumes[i] && costumes[i].asset) {
+              costume.asset = costumes[i].asset;
+            }
+          });
+        }
       }
     } else {
       await vm.addSprite(targetJSON);
