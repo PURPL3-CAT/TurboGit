@@ -109,11 +109,9 @@ async function pullFromFolder(vm) {
   // 2. List sprite folders on disk
   const folderSprites = await listDirs(root);
   const folderNames = folderSprites.map((s) => s.name);
-
   // 3. List original sprites in VM
   const vmSprites = vm.runtime.targets.filter((t) => t.isOriginal);
   const vmNames = vmSprites.map((t) => t.sprite.name);
-
   //
   // === DELETE SPRITES THAT NO LONGER EXIST ON DISK ===
   //
@@ -134,7 +132,6 @@ async function pullFromFolder(vm) {
     //
     const blocksText = await readTextFile(spriteDir, "blocks.json");
     const { blocks, scripts } = JSON.parse(blocksText);
-
     //
     // === LOAD COSTUMES ===
     //
@@ -147,7 +144,6 @@ async function pullFromFolder(vm) {
       const filename = `${meta.name}.${meta.dataFormat}`;
       const data = await readBinaryFile(costumesDir, filename);
       const assetId = await md5(data);
-
       // Convert Uint8Array to string for SVGs (VM expects string data for SVG assets)
       let assetData;
       if (meta.dataFormat === "svg") {
@@ -155,7 +151,6 @@ async function pullFromFolder(vm) {
       } else {
         assetData = data;
       }
-
       costumes.push({
         assetId,
         md5ext: `${assetId}.${meta.dataFormat}`,
@@ -168,17 +163,14 @@ async function pullFromFolder(vm) {
           meta.bitmapResolution || (meta.dataFormat === "svg" ? 1 : 2),
       });
     }
-
     //
     // === LOAD SOUNDS ===
     //
     const soundsDir = await spriteDir.getDirectoryHandle("sounds");
     const soundMeta = JSON.parse(await readTextFile(soundsDir, "sounds.json"));
-
     const sounds = [];
     for (const meta of soundMeta) {
       let data, ext;
-
       try {
         ext = "wav";
         data = await readBinaryFile(soundsDir, `${meta.name}.wav`);
@@ -186,18 +178,16 @@ async function pullFromFolder(vm) {
         ext = "mp3";
         data = await readBinaryFile(soundsDir, `${meta.name}.mp3`);
       }
-
       const assetId = await md5(data);
-
       sounds.push({
         assetId,
+        md5ext: `${assetId}.${ext}`,
         dataFormat: ext,
         name: meta.name,
         rate: meta.rate,
         sampleCount: meta.sampleCount,
       });
     }
-
     //
     // === BUILD TARGET JSON ===
     //
@@ -222,26 +212,21 @@ async function pullFromFolder(vm) {
       draggable: false,
       rotationStyle: "all around",
     };
-
     //
     // === REPLACE EXISTING SPRITE IF PRESENT ===
     //
     const existing = vm.runtime.targets.find(
       (t) => t.isOriginal && t.sprite.name === spriteName,
     );
-
     if (existing) {
       if (spriteName === "Stage") {
         console.log("Mutating Stage instead of deleting it");
-
         // Replace blocks
         existing.sprite.blocks._blocks = blocks;
         existing.sprite.blocks._scripts = scripts;
-
         // Replace costumes
         existing.sprite.costumes.length = 0;
         for (const c of costumes) existing.sprite.costumes.push(c);
-
         // Replace sounds
         existing.sprite.sounds.length = 0;
         for (const s of sounds) existing.sprite.sounds.push(s);
@@ -249,7 +234,6 @@ async function pullFromFolder(vm) {
         console.log("Replacing existing VM sprite:", spriteName);
         vm.deleteSprite(existing.id);
         await vm.addSprite(targetJSON);
-
         // Patch assets onto the newly added sprite's costumes
         const added = vm.runtime.targets.find(
           (t) => t.isOriginal && t.sprite.name === spriteName,
@@ -265,10 +249,8 @@ async function pullFromFolder(vm) {
     } else {
       await vm.addSprite(targetJSON);
     }
-
     console.log("Loaded:", spriteName);
   }
-
   console.log("PULL COMPLETE");
 }
 
