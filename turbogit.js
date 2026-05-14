@@ -1,44 +1,82 @@
 //========== DIRECTORY SETUP ============
-const root = await window.showDirectoryPicker();
-await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+if (typeof JSZip != "function") {
+  const root = await window.showDirectoryPicker();
+  await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+}
 
 // =========== UI SETUP ============
-const firstMenuItem = document.querySelectorAll('[class*="menu-bar-item"]')[0];
-const fragment = document.createDocumentFragment();
-const items = ["Push", "Pull"];
-
-items.forEach((text) => {
-  const button = document.createElement("div");
-  button.textContent = text;
-  button.className = firstMenuItem.className;
-  button.addEventListener("click", () => {
-    if (text === "Push") {
-      exportProject(vm);
-    } else if (text === "Pull") {
-      compileToSB3();
+function waitForElement(selector) {
+  return new Promise((resolve) => {
+    const el = document.querySelector(selector);
+    if (el) {
+      resolve(el);
+      return;
     }
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        resolve(el);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   });
-  const svgString = {
-    Push: `<svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
-  <path fill-rule="evenodd" d="M3 6a3 3 0 1 1 4 2.83v6.34a3.001 3.001 0 1 1-2 0V8.83A3.001 3.001 0 0 1 3 6Zm11.207-2.707a1 1 0 0 1 0 1.414L13.914 5H15a4 4 0 0 1 4 4v6.17a3.001 3.001 0 1 1-2 0V9a2 2 0 0 0-2-2h-1.086l.293.293a1 1 0 0 1-1.414 1.414l-2-2a1 1 0 0 1 0-1.414l2-2a1 1 0 0 1 1.414 0Z" clip-rule="evenodd"/>
-</svg>
-`,
-    Pull: `<svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
-  <path d="M8 3a3 3 0 0 0-1 5.83v6.34a3.001 3.001 0 1 0 2 0V15a2 2 0 0 1 2-2h1a5.002 5.002 0 0 0 4.927-4.146A3.001 3.001 0 0 0 16 3a3 3 0 0 0-1.105 5.79A3.001 3.001 0 0 1 12 11h-1c-.729 0-1.412.195-2 .535V8.83A3.001 3.001 0 0 0 8 3Z"/>
-</svg>
-`,
-  }[text];
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, "image/svg+xml");
-  const svgElement = doc.documentElement;
-  button.prepend(svgElement);
-  fragment.appendChild(button);
-});
+}
 
-firstMenuItem.parentElement.prepend(fragment);
+function createUI() {
+  if (!document.querySelectorAll('[id*="turbogit"]')[0]) {
+    const firstMenuItem = document.querySelectorAll(
+      '[class*="menu-bar-item"]',
+    )[0];
+    const fragment = document.createDocumentFragment();
+    const items = ["Push", "Pull"];
+
+    items.forEach((text) => {
+      const button = document.createElement("div");
+      button.id = `turbogit-${text.toLowerCase()}`;
+      button.textContent = text;
+      button.className = firstMenuItem.className;
+      button.addEventListener("click", () => {
+        if (text === "Push") {
+          exportProject(vm);
+        } else if (text === "Pull") {
+          compileToSB3();
+        }
+      });
+      const svgString = {
+        Push: `<svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+        <path fill-rule="evenodd" d="M3 6a3 3 0 1 1 4 2.83v6.34a3.001 3.001 0 1 1-2 0V8.83A3.001 3.001 0 0 1 3 6Zm11.207-2.707a1 1 0 0 1 0 1.414L13.914 5H15a4 4 0 0 1 4 4v6.17a3.001 3.001 0 1 1-2 0V9a2 2 0 0 0-2-2h-1.086l.293.293a1 1 0 0 1-1.414 1.414l-2-2a1 1 0 0 1 0-1.414l2-2a1 1 0 0 1 1.414 0Z" clip-rule="evenodd"/>
+        </svg>`,
+        Pull: `<svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M8 3a3 3 0 0 0-1 5.83v6.34a3.001 3.001 0 1 0 2 0V15a2 2 0 0 1 2-2h1a5.002 5.002 0 0 0 4.927-4.146A3.001 3.001 0 0 0 16 3a3 3 0 0 0-1.105 5.79A3.001 3.001 0 0 1 12 11h-1c-.729 0-1.412.195-2 .535V8.83A3.001 3.001 0 0 0 8 3Z"/>
+        </svg>`,
+      }[text];
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgString, "image/svg+xml");
+      const svgElement = doc.documentElement;
+      button.prepend(svgElement);
+      fragment.appendChild(button);
+    });
+
+    firstMenuItem.parentElement.prepend(fragment);
+  }
+}
+
+waitForElement('[class*="menu-bar-item"]').then(createUI);
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
+  //1. Clear existing contents of the folder except for .git
+  for await (const [name, handle] of root.entries()) {
+    if (name === ".git") continue;
+    if (handle.kind === "file") {
+      await root.removeEntry(name);
+    } else if (handle.kind === "directory") {
+      await deleteDirRecursive(handle);
+      await root.removeEntry(name, { recursive: true });
+    }
+  }
+
   // 2. Get only original sprites (ignore clones)
   const originals = vm.runtime.targets.filter((t) => t.isOriginal);
 
