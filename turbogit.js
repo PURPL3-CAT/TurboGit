@@ -105,156 +105,6 @@ async function exportProject(vm) {
   console.log("Export complete!");
 }
 
-//pullFromFolder(vm) - Pulls sprites from the selected folder into the VM, replacing existing sprites with the same name
-async function pullFromFolder(vm) {
-  // 2. List sprite folders on disk
-  const folderSprites = await listDirs(root);
-  const folderNames = folderSprites.map((s) => s.name);
-  // 3. List original sprites in VM
-  const vmSprites = vm.runtime.targets.filter((t) => t.isOriginal);
-  const vmNames = vmSprites.map((t) => t.sprite.name);
-  //
-  // === DELETE SPRITES THAT NO LONGER EXIST ON DISK ===
-  //
-  for (const target of vmSprites) {
-    const name = target.sprite.name;
-    if (!folderNames.includes(name)) {
-      console.log("Deleting VM sprite (missing on disk):", name);
-      vm.deleteSprite(target.id);
-    }
-  }
-  //
-  // === LOAD OR RELOAD SPRITES FROM DISK ===
-  //
-  for (const { name: spriteName, handle: spriteDir } of folderSprites) {
-    console.log("Loading sprite:", spriteName);
-    //
-    // === LOAD BLOCKS ===
-    //
-    const blocksText = await readTextFile(spriteDir, "blocks.json");
-    const { blocks, scripts } = JSON.parse(blocksText);
-    //
-    // === LOAD COSTUMES ===
-    //
-    const costumesDir = await spriteDir.getDirectoryHandle("costumes");
-    const costumeMeta = JSON.parse(
-      await readTextFile(costumesDir, "costumes.json"),
-    );
-    const costumes = [];
-    for (const meta of costumeMeta) {
-      const filename = `${meta.name}.${meta.dataFormat}`;
-      const data = await readBinaryFile(costumesDir, filename);
-      const assetId = await md5(data);
-      // Convert Uint8Array to string for SVGs (VM expects string data for SVG assets)
-      let assetData;
-      if (meta.dataFormat === "svg") {
-        assetData = new TextDecoder().decode(data);
-      } else {
-        assetData = data;
-      }
-      costumes.push({
-        assetId,
-        md5ext: `${assetId}.${meta.dataFormat}`,
-        dataFormat: meta.dataFormat,
-        name: meta.name,
-        rotationCenterX: meta.rotationCenterX,
-        rotationCenterY: meta.rotationCenterY,
-        asset: { data: assetData },
-        bitmapResolution:
-          meta.bitmapResolution || (meta.dataFormat === "svg" ? 1 : 2),
-      });
-    }
-    //
-    // === LOAD SOUNDS ===
-    //
-    const soundsDir = await spriteDir.getDirectoryHandle("sounds");
-    const soundMeta = JSON.parse(await readTextFile(soundsDir, "sounds.json"));
-    const sounds = [];
-    for (const meta of soundMeta) {
-      let data, ext;
-      try {
-        ext = "wav";
-        data = await readBinaryFile(soundsDir, `${meta.name}.wav`);
-      } catch {
-        ext = "mp3";
-        data = await readBinaryFile(soundsDir, `${meta.name}.mp3`);
-      }
-      const assetId = await md5(data);
-      sounds.push({
-        assetId,
-        md5ext: `${assetId}.${ext}`,
-        dataFormat: ext,
-        name: meta.name,
-        rate: meta.rate,
-        sampleCount: meta.sampleCount,
-      });
-    }
-    //
-    // === BUILD TARGET JSON ===
-    //
-    const targetJSON = {
-      isStage: false,
-      name: spriteName,
-      variables: {},
-      lists: {},
-      broadcasts: {},
-      blocks,
-      comments: {},
-      currentCostume: 0,
-      costumes,
-      sounds,
-      volume: 100,
-      layerOrder: 1,
-      visible: true,
-      x: 0,
-      y: 0,
-      size: 100,
-      direction: 90,
-      draggable: false,
-      rotationStyle: "all around",
-    };
-    //
-    // === REPLACE EXISTING SPRITE IF PRESENT ===
-    //
-    const existing = vm.runtime.targets.find(
-      (t) => t.isOriginal && t.sprite.name === spriteName,
-    );
-    if (existing) {
-      if (spriteName === "Stage") {
-        console.log("Mutating Stage instead of deleting it");
-        // Replace blocks
-        existing.sprite.blocks._blocks = blocks;
-        existing.sprite.blocks._scripts = scripts;
-        // Replace costumes
-        existing.sprite.costumes.length = 0;
-        for (const c of costumes) existing.sprite.costumes.push(c);
-        // Replace sounds
-        existing.sprite.sounds.length = 0;
-        for (const s of sounds) existing.sprite.sounds.push(s);
-      } else {
-        console.log("Replacing existing VM sprite:", spriteName);
-        vm.deleteSprite(existing.id);
-        await vm.addSprite(targetJSON);
-        // Patch assets onto the newly added sprite's costumes
-        const added = vm.runtime.targets.find(
-          (t) => t.isOriginal && t.sprite.name === spriteName,
-        );
-        if (added) {
-          added.sprite.costumes.forEach((costume, i) => {
-            if (costumes[i] && costumes[i].asset) {
-              costume.asset = costumes[i].asset;
-            }
-          });
-        }
-      }
-    } else {
-      await vm.addSprite(targetJSON);
-    }
-    console.log("Loaded:", spriteName);
-  }
-  console.log("PULL COMPLETE");
-}
-
 //compileAndLoad(vm) - Compiles the entire folder into an sb3 and loads it into the VM
 // ============ CRC32 TABLE ============
 let _crcTable;
@@ -522,15 +372,15 @@ async function compileToSB3() {
   const blob = await zip.generateAsync({ type: "blob" });
 
   //
-  // === DOWNLOAD ===
+  // === IMPORT ===
   //
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "project.sb3";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  // Convert blob → ArrayBuffer
+  const arrayBuffer = await blob.arrayBuffer();
 
-  console.log("SB3 compiled and downloaded.");
+  // Load into TurboWarp VM
+  await vm.loadProject(arrayBuffer);
+
+  console.log("SB3 compiled and loaded into VM.");
 }
 
 //HELPER FUNCTIONS
