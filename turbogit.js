@@ -1,5 +1,6 @@
 //shared
 const root = await window.showDirectoryPicker();
+await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
@@ -481,12 +482,16 @@ async function compileToSB3() {
     const target = {
       isStage,
       name: spriteName,
+      variables: {},
+      lists: {},
+      broadcasts: {},
+      comments: {},
       blocks,
       costumes,
       sounds,
       currentCostume: 0,
       volume: 100,
-      layerOrder: 1,
+      layerOrder: isStage ? 0 : 1,
       visible: true,
     };
 
