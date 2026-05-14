@@ -1,8 +1,18 @@
 //========== DIRECTORY SETUP ============
-if (typeof JSZip != "function") {
-  const root = await window.showDirectoryPicker();
-  await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+let root;
+
+async function initTurboGit() {
+  // 1) Ensure JSZip is available
+  if (typeof JSZip !== "function") {
+    await import(
+      "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
+    );
+  }
+
+  // 2) Ask user for the export/import directory
+  root = await window.showDirectoryPicker();
 }
+
 
 // =========== UI SETUP ============
 function waitForElement(selector) {
@@ -62,7 +72,11 @@ function createUI() {
   }
 }
 
-waitForElement('[class*="menu-bar-item"]').then(createUI);
+(async () => {
+  await initTurboGit();
+  waitForElement('[class*="menu-bar-item"]').then(createUI);
+})();
+
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
