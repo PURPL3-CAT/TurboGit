@@ -4,15 +4,34 @@ let root;
 async function initTurboGit() {
   // 1) Ensure JSZip is available
   if (typeof JSZip !== "function") {
-    await import(
-      "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
-    );
+    await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
   }
 
   // 2) Ask user for the export/import directory
   root = await window.showDirectoryPicker();
-}
 
+  class TurboGitExtension {
+    getInfo() {
+      return {
+        id: "isloaded",
+        name: "TurboGit",
+        blocks: [
+          {
+            opcode: "isLoaded",
+            blockType: "Boolean",
+            text: "turbogit loaded?",
+          },
+        ],
+      };
+    }
+
+    isLoaded() {
+      return true;
+    }
+  }
+
+  Scratch.extensions.register(new TurboGitExtension());
+}
 
 // =========== UI SETUP ============
 function waitForElement(selector) {
@@ -76,7 +95,6 @@ function createUI() {
   await initTurboGit();
   waitForElement('[class*="menu-bar-item"]').then(createUI);
 })();
-
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
