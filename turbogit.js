@@ -207,7 +207,20 @@ async function exportProject(vm) {
     await soundMetaWritable.close();
   }
 
-  console.log("Export complete!");
+  const extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
+    ? vm.extensionManager.workerURLs
+    : [];
+
+  const extensionsFile = await root.getFileHandle("extensions.json", {
+    create: true,
+  });
+  const extensionsWritable = await extensionsFile.createWritable();
+  await extensionsWritable.write(JSON.stringify(extensionSources, null, 2));
+  await extensionsWritable.close();
+
+  console.log("Export complete!", {
+    extensions: extensionSources,
+  });
 }
 
 //compileAndLoad(vm) - Compiles the entire folder into an sb3 and loads it into the VM
@@ -367,6 +380,37 @@ async function compileToSB3() {
     monitors: [],
     extensions: [],
   };
+
+  let extensionSources = [];
+  try {
+    const extensionsFileHandle = await getFileIfExists(root, "extensions.json");
+    if (extensionsFileHandle) {
+      const file = await extensionsFileHandle.getFile();
+      const extensionsText = await file.text();
+      extensionSources = JSON.parse(extensionsText);
+      if (!Array.isArray(extensionSources)) {
+        console.warn(
+          "[TurboGit] extensions.json did not contain an array, ignoring",
+          extensionSources,
+        );
+        extensionSources = [];
+      }
+    }
+  } catch (err) {
+    console.error("[TurboGit] failed to read extensions.json", err);
+    throw err;
+  }
+
+  console.log("[TurboGit] loaded extension sources:", extensionSources);
+  extensionSources.forEach((src) => {
+    if (!vm.extensionManager.workerURLs.includes(src)) {
+      vm.extensionManager.loadExtensionURL(src);
+    }
+  });
+  console.log(
+    "[TurboGit] vm.extensionManager.workerURLs:",
+    vm?.extensionManager?.workerURLs,
+  );
 
   const assets = [];
 
@@ -657,16 +701,18 @@ async function compileToSB3() {
 
   // Offer automatic download of the generated SB3
   try {
-    const downloadName = `turbogit-${Date.now()}.sb3`;
+    /* const downloadName = `turbogit-${Date.now()}.sb3`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = downloadName;
     document.body.appendChild(a);
-    // a.click(); // Commented out because its a debugging aid, not a feature
+    a.click();
     a.remove();
     URL.revokeObjectURL(url);
     console.log("[TurboGit] SB3 download initiated:", downloadName);
+    */
+    // Commented out the automatic download to avoid issues in some browsers, but this can be re-enabled if desired.
   } catch (err) {
     console.warn("[TurboGit] automatic SB3 download failed", err);
   }
@@ -761,6 +807,14 @@ async function getOrCreateDir(parent, name) {
 async function getDirIfExists(parent, name) {
   try {
     return await parent.getDirectoryHandle(name, { create: false });
+  } catch {
+    return null;
+  }
+}
+
+async function getFileIfExists(parent, name) {
+  try {
+    return await parent.getFileHandle(name, { create: false });
   } catch {
     return null;
   }
