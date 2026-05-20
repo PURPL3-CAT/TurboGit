@@ -340,6 +340,10 @@ function createZip(entries) {
 async function compileToSB3() {
   // root is the sprites folder
   let spriteDirs = await listDirs(root);
+  console.log(
+    "[TurboGit] root sprite dirs:",
+    spriteDirs.map((d) => d.name),
+  );
 
   // Ensure Stage is first
   spriteDirs.sort((a, b) => {
@@ -347,6 +351,11 @@ async function compileToSB3() {
     if (b.name === "Stage") return 1;
     return 0;
   });
+
+  console.log(
+    "[TurboGit] sorted sprite dirs:",
+    spriteDirs.map((d) => d.name),
+  );
 
   const project = {
     meta: {
@@ -360,107 +369,243 @@ async function compileToSB3() {
   const assets = [];
 
   for (const { name: spriteName, handle: spriteDir } of spriteDirs) {
-    console.log("Compiling:", spriteName);
+    console.groupCollapsed(`[TurboGit] Compiling: ${spriteName}`);
+    try {
+      await logDirectoryContents(spriteDir, `root/${spriteName}`);
 
-    //
-    // === LOAD BLOCKS ===
-    //
-    const blocksText = await readTextFile(spriteDir, "blocks.json");
-    const { blocks, scripts } = JSON.parse(blocksText);
-
-    //
-    // === LOAD COSTUMES ===
-    //
-    const costumesDir = await spriteDir.getDirectoryHandle("costumes");
-    const costumeMeta = JSON.parse(
-      await readTextFile(costumesDir, "costumes.json"),
-    );
-
-    const costumes = [];
-    for (const meta of costumeMeta) {
-      const filename = `${meta.name}.${meta.dataFormat}`;
-      const data = await readBinaryFile(costumesDir, filename);
-
-      const assetId = await md5(data);
-      const md5ext = `${assetId}.${meta.dataFormat}`;
-
-      assets.push({ md5ext, data });
-
-      costumes.push({
-        assetId,
-        md5ext,
-        dataFormat: meta.dataFormat,
-        name: meta.name,
-        rotationCenterX: meta.rotationCenterX,
-        rotationCenterY: meta.rotationCenterY,
-      });
-    }
-
-    //
-    // === LOAD SOUNDS ===
-    //
-    const soundsDir = await spriteDir.getDirectoryHandle("sounds");
-    const soundMeta = JSON.parse(await readTextFile(soundsDir, "sounds.json"));
-
-    const sounds = [];
-    for (const meta of soundMeta) {
-      let data, ext;
-
+      //
+      // === LOAD BLOCKS ===
+      //
+      const blocksText = await readTextFile(
+        spriteDir,
+        "blocks.json",
+        `${spriteName}/blocks.json`,
+      );
+      const { blocks, scripts } = JSON.parse(blocksText);
+      // Normalize block input formats (some exports use object form; VM expects arrays)
       try {
-        ext = "wav";
-        data = await readBinaryFile(soundsDir, `${meta.name}.wav`);
-      } catch {
-        ext = "mp3";
-        data = await readBinaryFile(soundsDir, `${meta.name}.mp3`);
+        for (const bid of Object.keys(blocks || {})) {
+          const blk = blocks[bid];
+          if (blk && blk.inputs && typeof blk.inputs === "object") {
+            for (const iname of Object.keys(blk.inputs)) {
+              const ival = blk.inputs[iname];
+              if (!Array.isArray(ival) && ival && typeof ival === "object") {
+                // pick block or shadow id if available
+                const ref = ival.block ?? ival.shadow ?? null;
+                if (ref) {
+                  blk.inputs[iname] = [1, ref];
+                } else {
+                  blk.inputs[iname] = [];
+                }
+              }
+            }
+          }
+        }
+        console.log(`[TurboGit] normalized blocks for ${spriteName}`);
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to normalize blocks for ${spriteName}`,
+          err,
+        );
+      }
+      console.log(`[TurboGit] loaded blocks for ${spriteName}`);
+
+      //
+      // === LOAD COSTUMES ===
+      //
+      const costumesDir = await getDirectoryHandleWithDebug(
+        spriteDir,
+        "costumes",
+        `${spriteName}/costumes`,
+      );
+      let costumeMeta;
+      try {
+        costumeMeta = JSON.parse(
+          await readTextFile(
+            costumesDir,
+            "costumes.json",
+            `${spriteName}/costumes/costumes.json`,
+          ),
+        );
+      } catch (err) {
+        if (err.name === "NotFoundError") {
+          console.warn(
+            `[TurboGit] missing costumes.json for ${spriteName}, inferring costume metadata from files`,
+          );
+          const files = await listFiles(costumesDir);
+          await logDirectoryContents(costumesDir, `${spriteName}/costumes`);
+          costumeMeta = files.map(({ name }) => {
+            const parts = name.split(".");
+            const ext = parts.pop();
+            const base = parts.join(".");
+            return {
+              name: base,
+              dataFormat: ext,
+              rotationCenterX: 0,
+              rotationCenterY: 0,
+            };
+          });
+          if (costumeMeta.length === 0) throw err;
+        } else {
+          throw err;
+        }
       }
 
-      const assetId = await md5(data);
-      const md5ext = `${assetId}.${ext}`;
+      const costumes = [];
+      for (const meta of costumeMeta) {
+        const filename = `${meta.name}.${meta.dataFormat}`;
+        console.log(
+          `[TurboGit] reading costume file: ${spriteName}/costumes/${filename}`,
+        );
+        const data = await readBinaryFile(
+          costumesDir,
+          filename,
+          `${spriteName}/costumes/${filename}`,
+        );
 
-      assets.push({ md5ext, data });
+        const assetId = await md5(data);
+        const md5ext = `${assetId}.${meta.dataFormat}`;
 
-      sounds.push({
-        assetId,
-        md5ext,
-        dataFormat: ext,
-        name: meta.name,
-        rate: meta.rate,
-        sampleCount: meta.sampleCount,
-      });
+        assets.push({ md5ext, data });
+
+        costumes.push({
+          assetId,
+          md5ext,
+          dataFormat: meta.dataFormat,
+          name: meta.name,
+          rotationCenterX: meta.rotationCenterX ?? 0,
+          rotationCenterY: meta.rotationCenterY ?? 0,
+        });
+      }
+
+      //
+      // === LOAD SOUNDS ===
+      //
+      const soundsDir = await getDirIfExists(spriteDir, "sounds");
+      let soundMeta = [];
+      if (soundsDir) {
+        try {
+          soundMeta = JSON.parse(
+            await readTextFile(
+              soundsDir,
+              "sounds.json",
+              `${spriteName}/sounds/sounds.json`,
+            ),
+          );
+        } catch (err) {
+          if (err.name === "NotFoundError") {
+            console.warn(
+              `[TurboGit] missing sounds.json for ${spriteName}, inferring sound metadata from files`,
+            );
+            const files = await listFiles(soundsDir);
+            await logDirectoryContents(soundsDir, `${spriteName}/sounds`);
+            soundMeta = files.map(({ name }) => {
+              const parts = name.split(".");
+              const ext = parts.pop().toLowerCase();
+              const base = parts.join(".");
+              return {
+                name: base,
+                dataFormat: ext,
+                rate: 44100,
+                sampleCount: 0,
+              };
+            });
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      const sounds = [];
+      for (const meta of soundMeta) {
+        let data, ext;
+
+        try {
+          ext = "wav";
+          data = await readBinaryFile(
+            soundsDir,
+            `${meta.name}.wav`,
+            `${spriteName}/sounds/${meta.name}.wav`,
+          );
+        } catch (firstErr) {
+          console.warn(
+            `[TurboGit] .wav missing for ${spriteName}/${meta.name}, trying mp3`,
+            firstErr,
+          );
+          try {
+            ext = "mp3";
+            data = await readBinaryFile(
+              soundsDir,
+              `${meta.name}.mp3`,
+              `${spriteName}/sounds/${meta.name}.mp3`,
+            );
+          } catch (secondErr) {
+            console.error(
+              `[TurboGit] failed to load sound for ${spriteName}/${meta.name}`,
+              secondErr,
+            );
+            await logDirectoryContents(soundsDir, `${spriteName}/sounds`);
+            throw secondErr;
+          }
+        }
+
+        const assetId = await md5(data);
+        const md5ext = `${assetId}.${ext}`;
+
+        assets.push({ md5ext, data });
+
+        sounds.push({
+          assetId,
+          md5ext,
+          dataFormat: ext,
+          name: meta.name,
+          rate: meta.rate,
+          sampleCount: meta.sampleCount,
+        });
+      }
+
+      //
+      // === BUILD TARGET ===
+      //
+      const isStage = spriteName === "Stage";
+
+      const target = {
+        isStage,
+        name: spriteName,
+        variables: {},
+        lists: {},
+        broadcasts: {},
+        comments: {},
+        blocks,
+        costumes,
+        sounds,
+        currentCostume: 0,
+        volume: 100,
+        layerOrder: isStage ? 0 : 1,
+        visible: true,
+      };
+
+      if (!isStage) {
+        // Sprite fields
+        target.x = 0;
+        target.y = 0;
+        target.size = 100;
+        target.direction = 90;
+        target.draggable = false;
+        target.rotationStyle = "all around";
+      }
+
+      project.targets.push(target);
+      console.log(`[TurboGit] compiled target for ${spriteName}`);
+    } catch (err) {
+      console.error(
+        `[TurboGit] compileToSB3 failed while processing ${spriteName}`,
+      );
+      console.error(err);
+      console.groupEnd();
+      throw err;
     }
-
-    //
-    // === BUILD TARGET ===
-    //
-    const isStage = spriteName === "Stage";
-
-    const target = {
-      isStage,
-      name: spriteName,
-      variables: {},
-      lists: {},
-      broadcasts: {},
-      comments: {},
-      blocks,
-      costumes,
-      sounds,
-      currentCostume: 0,
-      volume: 100,
-      layerOrder: isStage ? 0 : 1,
-      visible: true,
-    };
-
-    if (!isStage) {
-      // Sprite fields
-      target.x = 0;
-      target.y = 0;
-      target.size = 100;
-      target.direction = 90;
-      target.draggable = false;
-      target.rotationStyle = "all around";
-    }
-
-    project.targets.push(target);
+    console.groupEnd();
   }
 
   //
@@ -476,19 +621,105 @@ async function compileToSB3() {
 
   const blob = await zip.generateAsync({ type: "blob" });
 
+  // Offer automatic download of the generated SB3
+  try {
+    const downloadName = `turbogit-${Date.now()}.sb3`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    console.log("[TurboGit] SB3 download initiated:", downloadName);
+  } catch (err) {
+    console.warn("[TurboGit] automatic SB3 download failed", err);
+  }
+
   //
   // === IMPORT ===
   //
-  // Convert blob → ArrayBuffer
+  // Convert blob → ArrayBuffer (for loading into the VM)
   const arrayBuffer = await blob.arrayBuffer();
+  console.log("[TurboGit] arrayBuffer size:", arrayBuffer.byteLength);
+  console.log("[TurboGit] SB3 compiled, loading into VM...");
 
   // Load into TurboWarp VM
   await vm.loadProject(arrayBuffer);
 
-  console.log("SB3 compiled and loaded into VM.");
+  console.log("[TurboGit] SB3 compiled and loaded into VM.");
 }
 
 //HELPER FUNCTIONS
+async function logDirectoryContents(dirHandle, path) {
+  const entries = [];
+  try {
+    for await (const [name, handle] of dirHandle.entries()) {
+      entries.push(`${name} (${handle.kind})`);
+    }
+  } catch (err) {
+    console.error(`[TurboGit] failed to list contents of ${path}`);
+    throw err;
+  }
+  console.log(`[TurboGit] contents of ${path}:`, entries);
+  return entries;
+}
+
+async function getDirectoryHandleWithDebug(parent, name, path) {
+  console.log(`[TurboGit] getDirectoryHandle ${path}`);
+  try {
+    const handle = await parent.getDirectoryHandle(name);
+    console.log(`[TurboGit] found directory ${path}`);
+    return handle;
+  } catch (err) {
+    console.error(`[TurboGit] missing directory ${path}`);
+    await logDirectoryContents(parent, path);
+    throw err;
+  }
+}
+
+async function getFileHandleWithDebug(parent, name, path) {
+  console.log(`[TurboGit] getFileHandle ${path}`);
+  try {
+    const handle = await parent.getFileHandle(name);
+    console.log(`[TurboGit] found file ${path}`);
+    return handle;
+  } catch (err) {
+    console.error(`[TurboGit] missing file ${path}`);
+    await logDirectoryContents(parent, path);
+    throw err;
+  }
+}
+
+async function readTextFile(dirHandle, name, path = name) {
+  console.log(`[TurboGit] readTextFile ${path}`);
+  try {
+    const fileHandle = await getFileHandleWithDebug(dirHandle, name, path);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    console.log(`[TurboGit] readTextFile success ${path}`);
+    return text;
+  } catch (err) {
+    console.error(`[TurboGit] readTextFile failed ${path}`);
+    throw err;
+  }
+}
+
+async function readBinaryFile(dirHandle, name, path = name) {
+  console.log(`[TurboGit] readBinaryFile ${path}`);
+  try {
+    const fileHandle = await getFileHandleWithDebug(dirHandle, name, path);
+    const file = await fileHandle.getFile();
+    const data = new Uint8Array(await file.arrayBuffer());
+    console.log(`[TurboGit] readBinaryFile success ${path}`);
+    return data;
+  } catch (err) {
+    console.error(`[TurboGit] readBinaryFile failed ${path}`);
+    throw err;
+  }
+}
+
 async function getOrCreateDir(parent, name) {
   return await parent.getDirectoryHandle(name, { create: true });
 }
@@ -519,18 +750,6 @@ async function listFiles(dirHandle) {
     }
   }
   return out;
-}
-
-async function readTextFile(dirHandle, name) {
-  const fileHandle = await dirHandle.getFileHandle(name);
-  const file = await fileHandle.getFile();
-  return await file.text();
-}
-
-async function readBinaryFile(dirHandle, name) {
-  const fileHandle = await dirHandle.getFileHandle(name);
-  const file = await fileHandle.getFile();
-  return new Uint8Array(await file.arrayBuffer());
 }
 
 async function writeTextFile(dirHandle, name, text) {
