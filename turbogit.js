@@ -96,6 +96,10 @@ function createUI() {
   waitForElement('[class*="menu-bar-item"]').then(createUI);
 })();
 
+function normalizeLineEndingsCRLF(text) {
+  return text.replace(/\r?\n/g, "\r\n");
+}
+
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
   //1. Clear existing contents of the folder except for .git
@@ -131,7 +135,9 @@ async function exportProject(vm) {
       create: true,
     });
     const blocksWritable = await blocksFile.createWritable();
-    await blocksWritable.write(JSON.stringify(blocksObj, null, 2));
+    await blocksWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(blocksObj, null, 2)),
+    );
     await blocksWritable.close();
 
     //
@@ -167,7 +173,9 @@ async function exportProject(vm) {
       { create: true },
     );
     const costumeMetaWritable = await costumeMetaFile.createWritable();
-    await costumeMetaWritable.write(JSON.stringify(costumeMeta, null, 2));
+    await costumeMetaWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(costumeMeta, null, 2)),
+    );
     await costumeMetaWritable.close();
 
     //
@@ -203,7 +211,9 @@ async function exportProject(vm) {
       create: true,
     });
     const soundMetaWritable = await soundMetaFile.createWritable();
-    await soundMetaWritable.write(JSON.stringify(soundMeta, null, 2));
+    await soundMetaWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(soundMeta, null, 2)),
+    );
     await soundMetaWritable.close();
   }
 
@@ -215,7 +225,9 @@ async function exportProject(vm) {
     create: true,
   });
   const extensionsWritable = await extensionsFile.createWritable();
-  await extensionsWritable.write(JSON.stringify(extensionSources, null, 2));
+  await extensionsWritable.write(
+    normalizeLineEndingsCRLF(JSON.stringify(extensionSources, null, 2)),
+  );
   await extensionsWritable.close();
 
   console.log("Export complete!", {
