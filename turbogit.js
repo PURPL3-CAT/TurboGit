@@ -663,7 +663,7 @@ async function compileToSB3() {
     a.href = url;
     a.download = downloadName;
     document.body.appendChild(a);
-    a.click();
+    // a.click(); // Commented out because its a debugging aid, not a feature
     a.remove();
     URL.revokeObjectURL(url);
     console.log("[TurboGit] SB3 download initiated:", downloadName);
