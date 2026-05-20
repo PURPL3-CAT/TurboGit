@@ -364,6 +364,8 @@ async function compileToSB3() {
       agent: "custom",
     },
     targets: [],
+    monitors: [],
+    extensions: [],
   };
 
   const assets = [];
@@ -396,9 +398,20 @@ async function compileToSB3() {
                 const ref = ival.block ?? ival.shadow ?? null;
                 if (ref) {
                   blk.inputs[iname] = [1, ref];
+                } else if (Array.isArray(ival.value)) {
+                  blk.inputs[iname] = ival.value;
                 } else {
                   blk.inputs[iname] = [];
                 }
+              }
+            }
+          }
+
+          if (blk.fields && typeof blk.fields === "object") {
+            for (const fname of Object.keys(blk.fields)) {
+              const fval = blk.fields[fname];
+              if (!Array.isArray(fval) && fval && typeof fval === "object") {
+                blk.fields[fname] = [fval.value ?? null, fval.id ?? null];
               }
             }
           }
@@ -600,6 +613,10 @@ async function compileToSB3() {
         volume: 100,
         layerOrder: isStage ? 0 : 1,
         visible: true,
+        tempo: isStage ? 60 : undefined,
+        videoTransparency: isStage ? 50 : undefined,
+        videoState: isStage ? "on" : undefined,
+        textToSpeechLanguage: isStage ? null : undefined,
       };
 
       if (!isStage) {
