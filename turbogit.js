@@ -382,15 +382,17 @@ async function compileToSB3() {
         `${spriteName}/blocks.json`,
       );
       const { blocks, scripts } = JSON.parse(blocksText);
-      // Normalize block input formats (some exports use object form; VM expects arrays)
+
+      // Normalize block fields before validation and loading.
       try {
         for (const bid of Object.keys(blocks || {})) {
           const blk = blocks[bid];
-          if (blk && blk.inputs && typeof blk.inputs === "object") {
+          if (!blk || typeof blk !== "object") continue;
+
+          if (blk.inputs && typeof blk.inputs === "object") {
             for (const iname of Object.keys(blk.inputs)) {
               const ival = blk.inputs[iname];
               if (!Array.isArray(ival) && ival && typeof ival === "object") {
-                // pick block or shadow id if available
                 const ref = ival.block ?? ival.shadow ?? null;
                 if (ref) {
                   blk.inputs[iname] = [1, ref];
@@ -400,8 +402,23 @@ async function compileToSB3() {
               }
             }
           }
+
+          if (typeof blk.x === "string") {
+            const parsedX = parseFloat(blk.x);
+            blk.x = Number.isFinite(parsedX) ? parsedX : 0;
+          }
+          if (typeof blk.y === "string") {
+            const parsedY = parseFloat(blk.y);
+            blk.y = Number.isFinite(parsedY) ? parsedY : 0;
+          }
+          if (typeof blk.topLevel !== "boolean") {
+            blk.topLevel = Boolean(blk.topLevel);
+          }
+          if (typeof blk.shadow !== "boolean") {
+            blk.shadow = Boolean(blk.shadow);
+          }
         }
-        console.log(`[TurboGit] normalized blocks for ${spriteName}`);
+        console.log(`[TurboGit] normalized block metadata for ${spriteName}`);
       } catch (err) {
         console.warn(
           `[TurboGit] failed to normalize blocks for ${spriteName}`,
