@@ -414,11 +414,24 @@ async function compileToSB3() {
   }
 
   console.log("[TurboGit] loaded extension sources:", extensionSources);
-  extensionSources.forEach((src) => {
+  // Remove TurboGit extension from list of extensions to export/load
+  const filteredExtensionSources = extensionSources.filter(
+    (src) =>
+      typeof src === "string" &&
+      !src.toLowerCase().includes("turbogit") &&
+      !src.toLowerCase().includes("turbo-git"),
+  );
+
+  filteredExtensionSources.forEach((src) => {
     if (!vm.extensionManager.workerURLs.includes(src)) {
       vm.extensionManager.loadExtensionURL(src);
     }
   });
+
+  console.log(
+    "[TurboGit] filtered extension sources:",
+    filteredExtensionSources,
+  );
   console.log(
     "[TurboGit] vm.extensionManager.workerURLs:",
     vm?.extensionManager?.workerURLs,
