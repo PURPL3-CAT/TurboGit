@@ -217,9 +217,26 @@ async function exportProject(vm) {
     await soundMetaWritable.close();
   }
 
-  const extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
-    ? vm.extensionManager.workerURLs
-    : [];
+  let extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
+  ? vm.extensionManager.workerURLs
+  : [];
+  
+  console.log("[TurboGit] current extension sources:", extensionSources);
+  
+  extensionSources = extensionSources.filter(src => {
+    if (typeof src !== "string") return false;
+    const s = src.toLowerCase();
+    // Remove TurboGit in any form
+    if (s.includes("turbogit")) return false;
+    if (s.includes("vhvyrm9hit")) return false; // Base64 TurboGit
+    // Remove data URLs (TurboGit inline)
+    // if (s.startsWith("data:")) return false;
+    // Remove blob URLs (TurboGit worker)
+    // if (s.startsWith("blob:")) return false;
+    return true;
+  });
+
+  console.log("[TurboGit] filtered extension sources for export:", extensionSources);
 
   const extensionsFile = await root.getFileHandle("extensions.json", {
     create: true,
@@ -419,8 +436,8 @@ async function compileToSB3() {
   const filteredExtensionSources = extensionSources.filter(
     (src) =>
       typeof src === "string" &&
-      !src.toLowerCase().includes("turbogit") &&
-      !src.toLowerCase().includes("turbo-git"),
+      !src.toLowerCase().includes("vhvyrm9hit") &&
+      !src.toLowerCase().includes("turbogit"),
   );
 
   filteredExtensionSources.forEach((src) => {
@@ -727,7 +744,7 @@ async function compileToSB3() {
 
   // Offer automatic download of the generated SB3
   try {
-    /* const downloadName = `turbogit-${Date.now()}.sb3`;
+    /*const downloadName = `turbogit-${Date.now()}.sb3`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -738,6 +755,7 @@ async function compileToSB3() {
     URL.revokeObjectURL(url);
     console.log("[TurboGit] SB3 download initiated:", downloadName);
     */
+    
     // Commented out the automatic download to avoid issues in some browsers, but this can be re-enabled if desired.
   } catch (err) {
     console.warn("[TurboGit] automatic SB3 download failed", err);
