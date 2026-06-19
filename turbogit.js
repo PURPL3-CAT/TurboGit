@@ -365,6 +365,7 @@ function createZip(entries) {
 async function compileToSB3() {
   // root is the sprites folder
   let spriteDirs = await listDirs(root);
+  spriteDirs = spriteDirs.filter(d => !d.name.startsWith("."));
   console.log(
     "[TurboGit] root sprite dirs:",
     spriteDirs.map((d) => d.name),
