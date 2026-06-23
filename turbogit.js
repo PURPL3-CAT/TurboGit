@@ -208,7 +208,21 @@ function remapBlockIds(blocksObj) {
   return {
     blocks: remappedBlocks,
     scripts: remappedScripts,
+    idMap,
   };
+}
+
+function remapCommentBlockIds(comments, idMap) {
+  if (!comments || typeof comments !== "object" || Array.isArray(comments)) return {};
+  const remapped = {};
+  for (const [commentId, comment] of Object.entries(comments)) {
+    const remappedComment = { ...comment };
+    if (typeof remappedComment.blockId === "string") {
+      remappedComment.blockId = idMap[remappedComment.blockId] || remappedComment.blockId;
+    }
+    remapped[commentId] = remappedComment;
+  }
+  return remapped;
 }
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
@@ -237,10 +251,15 @@ async function exportProject(vm) {
     //
     // === BLOCKS ===
     //
-    const blocksObj = remapBlockIds({
+    const { blocks: remappedBlocks, scripts: remappedScripts, idMap } = remapBlockIds({
       blocks: sprite.blocks._blocks,
       scripts: sprite.blocks._scripts,
     });
+
+    const blocksObj = {
+      blocks: remappedBlocks,
+      scripts: remappedScripts,
+    };
 
     const blocksFile = await spriteFolder.getFileHandle("blocks.json", {
       create: true,
@@ -250,6 +269,19 @@ async function exportProject(vm) {
       normalizeLineEndingsCRLF(JSON.stringify(blocksObj, null, 2)),
     );
     await blocksWritable.close();
+
+    //
+    // === COMMENTS ===
+    //
+    const commentsObj = remapCommentBlockIds(target.comments || sprite.comments || {}, idMap);
+    const commentsFile = await spriteFolder.getFileHandle("comments.json", {
+      create: true,
+    });
+    const commentsWritable = await commentsFile.createWritable();
+    await commentsWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(commentsObj, null, 2)),
+    );
+    await commentsWritable.close();
 
     //
     // === VARIABLES ===
@@ -596,6 +628,27 @@ async function compileToSB3() {
       );
       const { blocks, scripts } = JSON.parse(blocksText);
 
+      let comments = {};
+      try {
+        const commentsFileHandle = await getFileIfExists(spriteDir, "comments.json");
+        if (commentsFileHandle) {
+          const commentsFile = await commentsFileHandle.getFile();
+          const commentsText = await commentsFile.text();
+          const parsedComments = JSON.parse(commentsText);
+          if (parsedComments && typeof parsedComments === "object" && !Array.isArray(parsedComments)) {
+            comments = parsedComments;
+          } else {
+            throw new Error("comments.json must contain an object");
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to load comments.json for ${spriteName}, using empty comments`,
+          err,
+        );
+        comments = {};
+      }
+
       let variables = {};
       try {
         const variablesFileHandle = await getFileIfExists(
@@ -864,7 +917,7 @@ async function compileToSB3() {
         variables,
         lists: {},
         broadcasts: {},
-        comments: {},
+        comments,
         blocks,
         costumes,
         sounds,
