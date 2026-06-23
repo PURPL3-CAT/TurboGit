@@ -100,6 +100,117 @@ function normalizeLineEndingsCRLF(text) {
   return text.replace(/\r?\n/g, "\r\n");
 }
 
+function remapBlockRefsInValue(value, idMap) {
+  if (typeof value === "string") {
+    return idMap[value] || value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => remapBlockRefsInValue(item, idMap));
+  }
+  if (value && typeof value === "object") {
+    const result = {};
+    for (const key of Object.keys(value)) {
+      result[key] = remapBlockRefsInValue(value[key], idMap);
+    }
+    return result;
+  }
+  return value;
+}
+
+function traverseBlockRefs(value, blocks, visited, order) {
+  if (typeof value === "string") {
+    if (blocks[value] && !visited.has(value)) {
+      traverseBlock(value, blocks, visited, order);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) traverseBlockRefs(item, blocks, visited, order);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) traverseBlockRefs(value[key], blocks, visited, order);
+  }
+}
+
+function traverseBlock(blockId, blocks, visited, order) {
+  if (!blockId || visited.has(blockId) || !blocks[blockId]) return;
+  visited.add(blockId);
+  order.push(blockId);
+  const block = blocks[blockId];
+  if (block.next) traverseBlock(block.next, blocks, visited, order);
+  if (block.inputs && typeof block.inputs === "object") {
+    traverseBlockRefs(block.inputs, blocks, visited, order);
+  }
+  if (block.fields && typeof block.fields === "object") {
+    traverseBlockRefs(block.fields, blocks, visited, order);
+  }
+}
+
+function remapBlockIds(blocksObj) {
+  const blocks = blocksObj.blocks || {};
+  const visited = new Set();
+  const order = [];
+
+  if (Array.isArray(blocksObj.scripts)) {
+    for (const script of blocksObj.scripts) {
+      if (Array.isArray(script)) {
+        for (const item of script) {
+          if (typeof item === "string" && blocks[item]) {
+            traverseBlock(item, blocks, visited, order);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  for (const blockId of Object.keys(blocks)) {
+    if (!visited.has(blockId)) {
+      traverseBlock(blockId, blocks, visited, order);
+    }
+  }
+
+  const counts = {};
+  const idMap = {};
+  for (const oldId of order) {
+    const opcode = (blocks[oldId] && blocks[oldId].opcode) || "block";
+    const base = String(opcode).replace(/[^A-Za-z0-9_]/g, "_");
+    counts[base] = (counts[base] || 0) + 1;
+    idMap[oldId] = `${base}${counts[base]}`;
+  }
+
+  const remappedBlocks = {};
+  for (const oldId of order) {
+    const newId = idMap[oldId];
+    const block = blocks[oldId];
+    const remappedBlock = {
+      ...block,
+      id: newId,
+      next: block.next && idMap[block.next] ? idMap[block.next] : block.next,
+      parent: block.parent && idMap[block.parent] ? idMap[block.parent] : block.parent,
+    };
+
+    if (remappedBlock.inputs && typeof remappedBlock.inputs === "object") {
+      remappedBlock.inputs = remapBlockRefsInValue(remappedBlock.inputs, idMap);
+    }
+    if (remappedBlock.fields && typeof remappedBlock.fields === "object") {
+      remappedBlock.fields = remapBlockRefsInValue(remappedBlock.fields, idMap);
+    }
+
+    remappedBlocks[newId] = remappedBlock;
+  }
+
+  const remappedScripts = Array.isArray(blocksObj.scripts)
+    ? blocksObj.scripts.map((script) => remapBlockRefsInValue(script, idMap))
+    : blocksObj.scripts;
+
+  return {
+    blocks: remappedBlocks,
+    scripts: remappedScripts,
+  };
+}
+
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
   //1. Clear existing contents of the folder except for .git
@@ -126,10 +237,10 @@ async function exportProject(vm) {
     //
     // === BLOCKS ===
     //
-    const blocksObj = {
+    const blocksObj = remapBlockIds({
       blocks: sprite.blocks._blocks,
       scripts: sprite.blocks._scripts,
-    };
+    });
 
     const blocksFile = await spriteFolder.getFileHandle("blocks.json", {
       create: true,
