@@ -141,6 +141,19 @@ async function exportProject(vm) {
     await blocksWritable.close();
 
     //
+    // === VARIABLES ===
+    //
+    const variablesObj = target.variables || sprite.variables || {};
+    const variablesFile = await spriteFolder.getFileHandle("variables.json", {
+      create: true,
+    });
+    const variablesWritable = await variablesFile.createWritable();
+    await variablesWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(variablesObj, null, 2)),
+    );
+    await variablesWritable.close();
+
+    //
     // === COSTUMES ===
     //
     const costumesFolder = await spriteFolder.getDirectoryHandle("costumes", {
@@ -472,6 +485,54 @@ async function compileToSB3() {
       );
       const { blocks, scripts } = JSON.parse(blocksText);
 
+      let variables = {};
+      try {
+        const variablesFileHandle = await getFileIfExists(
+          spriteDir,
+          "variables.json",
+        );
+        if (variablesFileHandle) {
+          const variablesFile = await variablesFileHandle.getFile();
+          const variablesText = await variablesFile.text();
+          const parsedVariables = JSON.parse(variablesText);
+          if (parsedVariables && typeof parsedVariables === "object" && !Array.isArray(parsedVariables)) {
+            for (const [varId, varValue] of Object.entries(parsedVariables)) {
+              if (Array.isArray(varValue)) {
+                variables[varId] = varValue;
+                continue;
+              }
+
+              if (varValue && typeof varValue === "object") {
+                variables[varId] = [
+                  String(varValue.name ?? varValue.id ?? ""),
+                  varValue.value ?? 0,
+                ];
+                continue;
+              }
+
+              if (typeof varValue === "string" || typeof varValue === "number" || typeof varValue === "boolean") {
+                variables[varId] = [String(varId), varValue];
+                continue;
+              }
+
+              console.warn(
+                `[TurboGit] unsupported variable entry for ${spriteName}:${varId}`,
+                varValue,
+              );
+              variables[varId] = [String(varId), null];
+            }
+          } else {
+            throw new Error("variables.json must contain an object");
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to load variables.json for ${spriteName}, using empty variables`,
+          err,
+        );
+        variables = {};
+      }
+
       // Normalize block fields before validation and loading.
       try {
         for (const bid of Object.keys(blocks || {})) {
@@ -689,7 +750,7 @@ async function compileToSB3() {
       const target = {
         isStage,
         name: spriteName,
-        variables: {},
+        variables,
         lists: {},
         broadcasts: {},
         comments: {},
