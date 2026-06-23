@@ -100,6 +100,56 @@ function normalizeLineEndingsCRLF(text) {
   return text.replace(/\r?\n/g, "\r\n");
 }
 
+function encodeSafeName(name) {
+  return encodeURIComponent(String(name));
+}
+
+function decodeSafeName(name) {
+  try {
+    return decodeURIComponent(String(name));
+  } catch (err) {
+    return String(name);
+  }
+}
+
+function normalizeBroadcastMap(broadcasts) {
+  if (!broadcasts || typeof broadcasts !== "object" || Array.isArray(broadcasts)) {
+    return {};
+  }
+  const normalized = {};
+  for (const [broadcastId, broadcastValue] of Object.entries(broadcasts)) {
+    if (broadcastValue == null) continue;
+    normalized[broadcastId] = String(broadcastValue);
+  }
+  return normalized;
+}
+
+function normalizeVariableMap(variables, broadcasts) {
+  if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
+    return {};
+  }
+  const normalized = {};
+  for (const [varId, varValue] of Object.entries(variables)) {
+    if (broadcasts && Object.prototype.hasOwnProperty.call(broadcasts, varId)) {
+      continue;
+    }
+    if (Array.isArray(varValue) && varValue.length >= 2) {
+      normalized[varId] = [String(varValue[0]), varValue[1]];
+      continue;
+    }
+    if (varValue && typeof varValue === "object") {
+      normalized[varId] = [String(varValue.name ?? varValue.id ?? varId), varValue.value ?? 0];
+      continue;
+    }
+    if (typeof varValue === "string" || typeof varValue === "number" || typeof varValue === "boolean") {
+      normalized[varId] = [String(varId), varValue];
+      continue;
+    }
+    normalized[varId] = [String(varId), null];
+  }
+  return normalized;
+}
+
 function remapBlockRefsInValue(value, idMap) {
   if (typeof value === "string") {
     return idMap[value] || value;
@@ -246,7 +296,7 @@ async function exportProject(vm) {
     const name = sprite.name;
 
     // 3. Create folder for this sprite
-    const spriteFolder = await root.getDirectoryHandle(name, { create: true });
+    const spriteFolder = await getOrCreateDir(root, name);
 
     //
     // === BLOCKS ===
@@ -283,10 +333,21 @@ async function exportProject(vm) {
     );
     await commentsWritable.close();
 
+    // === BROADCASTS ===
+    const broadcastsObj = normalizeBroadcastMap(target.broadcasts || sprite.broadcasts || {});
+    const broadcastsFile = await spriteFolder.getFileHandle("broadcasts.json", {
+      create: true,
+    });
+    const broadcastsWritable = await broadcastsFile.createWritable();
+    await broadcastsWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(broadcastsObj, null, 2)),
+    );
+    await broadcastsWritable.close();
+
     //
     // === VARIABLES ===
     //
-    const variablesObj = target.variables || sprite.variables || {};
+    const variablesObj = normalizeVariableMap(target.variables || sprite.variables || {}, broadcastsObj);
     const variablesFile = await spriteFolder.getFileHandle("variables.json", {
       create: true,
     });
@@ -661,14 +722,14 @@ async function compileToSB3() {
           const parsedVariables = JSON.parse(variablesText);
           if (parsedVariables && typeof parsedVariables === "object" && !Array.isArray(parsedVariables)) {
             for (const [varId, varValue] of Object.entries(parsedVariables)) {
-              if (Array.isArray(varValue)) {
-                variables[varId] = varValue;
+              if (Array.isArray(varValue) && varValue.length >= 2) {
+                variables[varId] = [String(varValue[0]), varValue[1]];
                 continue;
               }
 
               if (varValue && typeof varValue === "object") {
                 variables[varId] = [
-                  String(varValue.name ?? varValue.id ?? ""),
+                  String(varValue.name ?? varValue.id ?? varId),
                   varValue.value ?? 0,
                 ];
                 continue;
@@ -695,6 +756,30 @@ async function compileToSB3() {
           err,
         );
         variables = {};
+      }
+
+      let broadcasts = {};
+      try {
+        const broadcastsFileHandle = await getFileIfExists(
+          spriteDir,
+          "broadcasts.json",
+        );
+        if (broadcastsFileHandle) {
+          const broadcastsFile = await broadcastsFileHandle.getFile();
+          const broadcastsText = await broadcastsFile.text();
+          const parsedBroadcasts = JSON.parse(broadcastsText);
+          if (parsedBroadcasts && typeof parsedBroadcasts === "object" && !Array.isArray(parsedBroadcasts)) {
+            broadcasts = parsedBroadcasts;
+          } else {
+            throw new Error("broadcasts.json must contain an object");
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to load broadcasts.json for ${spriteName}, using empty broadcasts`,
+          err,
+        );
+        broadcasts = {};
       }
 
       // Normalize block fields before validation and loading.
@@ -916,7 +1001,7 @@ async function compileToSB3() {
         name: spriteName,
         variables,
         lists: {},
-        broadcasts: {},
+        broadcasts,
         comments,
         blocks,
         costumes,
@@ -969,7 +1054,7 @@ async function compileToSB3() {
 
   // Offer automatic download of the generated SB3
   try {
-    /*const downloadName = `turbogit-${Date.now()}.sb3`;
+    const downloadName = `turbogit-${Date.now()}.sb3`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -979,7 +1064,7 @@ async function compileToSB3() {
     a.remove();
     URL.revokeObjectURL(url);
     console.log("[TurboGit] SB3 download initiated:", downloadName);
-    */
+    
     
     // Commented out the automatic download to avoid issues in some browsers, but this can be re-enabled if desired.
   } catch (err) {
@@ -1017,11 +1102,21 @@ async function logDirectoryContents(dirHandle, path) {
 
 async function getDirectoryHandleWithDebug(parent, name, path) {
   console.log(`[TurboGit] getDirectoryHandle ${path}`);
+  const encodedName = encodeSafeName(name);
   try {
-    const handle = await parent.getDirectoryHandle(name);
+    const handle = await parent.getDirectoryHandle(encodedName);
     console.log(`[TurboGit] found directory ${path}`);
     return handle;
   } catch (err) {
+    if (encodedName !== name) {
+      try {
+        const handle = await parent.getDirectoryHandle(name);
+        console.log(`[TurboGit] found raw directory ${path}`);
+        return handle;
+      } catch {
+        // fall through
+      }
+    }
     console.error(`[TurboGit] missing directory ${path}`);
     await logDirectoryContents(parent, path);
     throw err;
@@ -1030,11 +1125,21 @@ async function getDirectoryHandleWithDebug(parent, name, path) {
 
 async function getFileHandleWithDebug(parent, name, path) {
   console.log(`[TurboGit] getFileHandle ${path}`);
+  const encodedName = encodeSafeName(name);
   try {
-    const handle = await parent.getFileHandle(name);
+    const handle = await parent.getFileHandle(encodedName);
     console.log(`[TurboGit] found file ${path}`);
     return handle;
   } catch (err) {
+    if (encodedName !== name) {
+      try {
+        const handle = await parent.getFileHandle(name);
+        console.log(`[TurboGit] found raw file ${path}`);
+        return handle;
+      } catch {
+        // fall through
+      }
+    }
     console.error(`[TurboGit] missing file ${path}`);
     await logDirectoryContents(parent, path);
     throw err;
@@ -1070,21 +1175,37 @@ async function readBinaryFile(dirHandle, name, path = name) {
 }
 
 async function getOrCreateDir(parent, name) {
-  return await parent.getDirectoryHandle(name, { create: true });
+  return await parent.getDirectoryHandle(encodeSafeName(name), { create: true });
 }
 
 async function getDirIfExists(parent, name) {
+  const encodedName = encodeSafeName(name);
   try {
-    return await parent.getDirectoryHandle(name, { create: false });
+    return await parent.getDirectoryHandle(encodedName, { create: false });
   } catch {
+    if (encodedName !== name) {
+      try {
+        return await parent.getDirectoryHandle(name, { create: false });
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
 
 async function getFileIfExists(parent, name) {
+  const encodedName = encodeSafeName(name);
   try {
-    return await parent.getFileHandle(name, { create: false });
+    return await parent.getFileHandle(encodedName, { create: false });
   } catch {
+    if (encodedName !== name) {
+      try {
+        return await parent.getFileHandle(name, { create: false });
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
@@ -1093,7 +1214,7 @@ async function listDirs(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "directory") {
-      out.push({ name, handle });
+      out.push({ name: decodeSafeName(name), handle });
     }
   }
   return out;
@@ -1103,21 +1224,21 @@ async function listFiles(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "file") {
-      out.push({ name, handle });
+      out.push({ name: decodeSafeName(name), handle });
     }
   }
   return out;
 }
 
 async function writeTextFile(dirHandle, name, text) {
-  const fileHandle = await dirHandle.getFileHandle(name, { create: true });
+  const fileHandle = await dirHandle.getFileHandle(encodeSafeName(name), { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(text);
   await writable.close();
 }
 
 async function writeBinaryFile(dirHandle, name, uint8Array) {
-  const fileHandle = await dirHandle.getFileHandle(name, { create: true });
+  const fileHandle = await dirHandle.getFileHandle(encodeSafeName(name), { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(uint8Array);
   await writable.close();
@@ -1135,19 +1256,37 @@ async function deleteDirRecursive(dirHandle) {
 }
 
 async function fileExists(dirHandle, name) {
+  const encodedName = encodeSafeName(name);
   try {
-    await dirHandle.getFileHandle(name);
+    await dirHandle.getFileHandle(encodedName);
     return true;
   } catch {
+    if (encodedName !== name) {
+      try {
+        await dirHandle.getFileHandle(name);
+        return true;
+      } catch {
+        return false;
+      }
+    }
     return false;
   }
 }
 
 async function dirExists(parentHandle, name) {
+  const encodedName = encodeSafeName(name);
   try {
-    await parentHandle.getDirectoryHandle(name);
+    await parentHandle.getDirectoryHandle(encodedName);
     return true;
   } catch {
+    if (encodedName !== name) {
+      try {
+        await parentHandle.getDirectoryHandle(name);
+        return true;
+      } catch {
+        return false;
+      }
+    }
     return false;
   }
 }
