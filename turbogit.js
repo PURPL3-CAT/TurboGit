@@ -335,6 +335,8 @@ async function exportProject(vm, logger = { log() {} }) {
     return true;
   });
 
+  extensionSources.sort((a, b) => a.length - b.length);
+
   logger.log("[TurboGit] filtered extension sources for export: " + JSON.stringify(extensionSources));
 
   const extensionsFile = await root.getFileHandle("extensions.json", {
