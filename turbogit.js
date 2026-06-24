@@ -153,6 +153,16 @@ async function exportProject(vm) {
     );
     await variablesWritable.close();
 
+    const commentsObj = target.comments || sprite.comments || {};
+    const commentsFile = await spriteFolder.getFileHandle("comments.json", {
+      create: true,
+    });
+    const commentsWritable = await commentsFile.createWritable();
+    await commentsWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(commentsObj, null, 2)),
+    );
+    await commentsWritable.close();
+
     //
     // === COSTUMES ===
     //
@@ -485,6 +495,50 @@ async function compileToSB3() {
       );
       const { blocks, scripts } = JSON.parse(blocksText);
 
+      let variables = {};
+      let broadcasts = {};
+      let comments = {};
+
+      try {
+        const variablesFileHandle = await getFileIfExists(spriteDir, "variables.json");
+        if (variablesFileHandle) {
+          const variablesFile = await variablesFileHandle.getFile();
+          const variablesText = await variablesFile.text();
+          const parsedVariables = JSON.parse(variablesText);
+          if (parsedVariables && typeof parsedVariables === "object" && !Array.isArray(parsedVariables)) {
+            variables = normalizeScratchVariables(parsedVariables);
+          } else {
+            throw new Error("variables.json must contain an object");
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to load variables.json for ${spriteName}, using empty variables`,
+          err,
+        );
+        variables = {};
+      }
+
+      try {
+        const commentsFileHandle = await getFileIfExists(spriteDir, "comments.json");
+        if (commentsFileHandle) {
+          const commentsFile = await commentsFileHandle.getFile();
+          const commentsText = await commentsFile.text();
+          const parsedComments = JSON.parse(commentsText);
+          if (parsedComments && typeof parsedComments === "object" && !Array.isArray(parsedComments)) {
+            comments = parsedComments;
+          } else {
+            throw new Error("comments.json must contain an object");
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[TurboGit] failed to load comments.json for ${spriteName}, using empty comments`,
+          err,
+        );
+        comments = {};
+      }
+
       // Normalize block fields before validation and loading.
       try {
         for (const bid of Object.keys(blocks || {})) {
@@ -710,8 +764,9 @@ async function compileToSB3() {
         variables: targetVariables,
         lists: {},
         broadcasts: targetBroadcasts,
-        comments: {},
+        comments,
         blocks,
+        scripts,
         costumes,
         sounds,
         currentCostume: 0,
