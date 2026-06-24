@@ -141,6 +141,19 @@ async function exportProject(vm) {
     await blocksWritable.close();
 
     //
+    // === VARIABLES ===
+    // Save the raw runtime variable records so we can rebuild SB3 project variables and broadcasts later.
+    const variableMap = target.variables || {};
+    const variablesFile = await spriteFolder.getFileHandle("variables.json", {
+      create: true,
+    });
+    const variablesWritable = await variablesFile.createWritable();
+    await variablesWritable.write(
+      normalizeLineEndingsCRLF(JSON.stringify(variableMap, null, 2)),
+    );
+    await variablesWritable.close();
+
+    //
     // === COSTUMES ===
     //
     const costumesFolder = await spriteFolder.getDirectoryHandle("costumes", {
@@ -686,12 +699,17 @@ async function compileToSB3() {
       //
       const isStage = spriteName === "Stage";
 
+      const { targetVariables, targetBroadcasts } = await loadTargetVariables(
+        spriteDir,
+        spriteName,
+      );
+
       const target = {
         isStage,
         name: spriteName,
-        variables: {},
+        variables: targetVariables,
         lists: {},
-        broadcasts: {},
+        broadcasts: targetBroadcasts,
         comments: {},
         blocks,
         costumes,
@@ -896,6 +914,53 @@ async function writeBinaryFile(dirHandle, name, uint8Array) {
   const writable = await fileHandle.createWritable();
   await writable.write(uint8Array);
   await writable.close();
+}
+
+async function loadTargetVariables(spriteDir, spriteName) {
+  const variablesFileHandle = await getFileIfExists(spriteDir, "variables.json");
+  if (!variablesFileHandle) {
+    return { targetVariables: {}, targetBroadcasts: {} };
+  }
+
+  const file = await variablesFileHandle.getFile();
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    console.warn(
+      `[TurboGit] invalid variables.json for ${spriteName}, ignoring`,
+      err,
+    );
+    return { targetVariables: {}, targetBroadcasts: {} };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    console.warn(
+      `[TurboGit] variables.json for ${spriteName} did not contain an object, ignoring`,
+    );
+    return { targetVariables: {}, targetBroadcasts: {} };
+  }
+
+  const targetVariables = {};
+  const targetBroadcasts = {};
+
+  for (const [id, item] of Object.entries(parsed)) {
+    if (Array.isArray(item)) {
+      targetVariables[id] = [item[0], item[1]];
+      continue;
+    }
+
+    if (item && typeof item === "object") {
+      if (item.type === "broadcast_msg") {
+        targetBroadcasts[id] = item.value ?? item.name;
+      } else {
+        targetVariables[id] = [item.name ?? id, item.value];
+      }
+    }
+  }
+
+  return { targetVariables, targetBroadcasts };
 }
 
 async function deleteDirRecursive(dirHandle) {
