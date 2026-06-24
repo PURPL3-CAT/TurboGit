@@ -152,6 +152,18 @@ function normalizeLineEndingsCRLF(text) {
   return text.replace(/\r?\n/g, "\r\n");
 }
 
+function sanitizeFileName(name) {
+  return String(name).replace(/[\/\\:\*\?"<>|]/g, (char) => encodeURIComponent(char));
+}
+
+function decodeFileName(name) {
+  try {
+    return decodeURIComponent(String(name));
+  } catch (err) {
+    return String(name);
+  }
+}
+
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm, logger = { log() {} }) {
   logger.log("[TurboGit] Clearing export folder...");
@@ -177,11 +189,12 @@ async function exportProject(vm, logger = { log() {} }) {
     const target = originals[index];
     const sprite = target.sprite;
     const name = sprite.name;
+    const spriteFolderName = sanitizeFileName(name);
     logger.log(`[TurboGit] Exporting sprite: ${name}`);
     logger.progress(index + 1, originals.length, `Exporting ${name}`);
 
     // 3. Create folder for this sprite
-    const spriteFolder = await root.getDirectoryHandle(name, { create: true });
+    const spriteFolder = await root.getDirectoryHandle(spriteFolderName, { create: true });
 
     //
     // === BLOCKS ===
@@ -234,7 +247,7 @@ async function exportProject(vm, logger = { log() {} }) {
     const costumeMeta = [];
 
     for (const costume of sprite.costumes) {
-      const filename = `${costume.name}.${costume.dataFormat}`;
+      const filename = `${sanitizeFileName(costume.name)}.${costume.dataFormat}`;
       const fileHandle = await costumesFolder.getFileHandle(filename, {
         create: true,
       });
@@ -273,7 +286,7 @@ async function exportProject(vm, logger = { log() {} }) {
 
     for (const sound of sprite.sounds) {
       const ext = sound.md5.split(".").pop();
-      const filename = `${sound.name}.${ext}`;
+      const filename = `${sanitizeFileName(sound.name)}.${ext}`;
 
       const fileHandle = await soundsFolder.getFileHandle(filename, {
         create: true,
@@ -686,7 +699,7 @@ async function compileToSB3() {
             const ext = parts.pop();
             const base = parts.join(".");
             return {
-              name: base,
+              name: decodeFileName(base),
               dataFormat: ext,
               rotationCenterX: 0,
               rotationCenterY: 0,
@@ -700,7 +713,7 @@ async function compileToSB3() {
 
       const costumes = [];
       for (const meta of costumeMeta) {
-        const filename = `${meta.name}.${meta.dataFormat}`;
+        const filename = `${sanitizeFileName(meta.name)}.${meta.dataFormat}`;
         console.log(
           `[TurboGit] reading costume file: ${spriteName}/costumes/${filename}`,
         );
@@ -751,7 +764,7 @@ async function compileToSB3() {
               const ext = parts.pop().toLowerCase();
               const base = parts.join(".");
               return {
-                name: base,
+                name: decodeFileName(base),
                 dataFormat: ext,
                 rate: 44100,
                 sampleCount: 0,
@@ -771,7 +784,7 @@ async function compileToSB3() {
           ext = "wav";
           data = await readBinaryFile(
             soundsDir,
-            `${meta.name}.wav`,
+            `${sanitizeFileName(meta.name)}.wav`,
             `${spriteName}/sounds/${meta.name}.wav`,
           );
         } catch (firstErr) {
@@ -783,7 +796,7 @@ async function compileToSB3() {
             ext = "mp3";
             data = await readBinaryFile(
               soundsDir,
-              `${meta.name}.mp3`,
+              `${sanitizeFileName(meta.name)}.mp3`,
               `${spriteName}/sounds/${meta.name}.mp3`,
             );
           } catch (secondErr) {
@@ -1005,7 +1018,7 @@ async function listDirs(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "directory") {
-      out.push({ name, handle });
+      out.push({ name: decodeFileName(name), handle });
     }
   }
   return out;
@@ -1015,7 +1028,7 @@ async function listFiles(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "file") {
-      out.push({ name, handle });
+      out.push({ name: decodeFileName(name), handle });
     }
   }
   return out;
