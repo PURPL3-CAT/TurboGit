@@ -100,181 +100,6 @@ function normalizeLineEndingsCRLF(text) {
   return text.replace(/\r?\n/g, "\r\n");
 }
 
-function encodeSafeName(name) {
-  return encodeURIComponent(String(name));
-}
-
-function decodeSafeName(name) {
-  try {
-    return decodeURIComponent(String(name));
-  } catch (err) {
-    return String(name);
-  }
-}
-
-function normalizeBroadcastMap(broadcasts) {
-  if (!broadcasts || typeof broadcasts !== "object" || Array.isArray(broadcasts)) {
-    return {};
-  }
-  const normalized = {};
-  for (const [broadcastId, broadcastValue] of Object.entries(broadcasts)) {
-    if (broadcastValue == null) continue;
-    normalized[broadcastId] = String(broadcastValue);
-  }
-  return normalized;
-}
-
-function normalizeVariableMap(variables, broadcasts) {
-  if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
-    return {};
-  }
-  const normalized = {};
-  for (const [varId, varValue] of Object.entries(variables)) {
-    if (broadcasts && Object.prototype.hasOwnProperty.call(broadcasts, varId)) {
-      continue;
-    }
-    if (Array.isArray(varValue) && varValue.length >= 2) {
-      normalized[varId] = [String(varValue[0]), varValue[1]];
-      continue;
-    }
-    if (varValue && typeof varValue === "object") {
-      normalized[varId] = [String(varValue.name ?? varValue.id ?? varId), varValue.value ?? 0];
-      continue;
-    }
-    if (typeof varValue === "string" || typeof varValue === "number" || typeof varValue === "boolean") {
-      normalized[varId] = [String(varId), varValue];
-      continue;
-    }
-    normalized[varId] = [String(varId), null];
-  }
-  return normalized;
-}
-
-function remapBlockRefsInValue(value, idMap) {
-  if (typeof value === "string") {
-    return idMap[value] || value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => remapBlockRefsInValue(item, idMap));
-  }
-  if (value && typeof value === "object") {
-    const result = {};
-    for (const key of Object.keys(value)) {
-      result[key] = remapBlockRefsInValue(value[key], idMap);
-    }
-    return result;
-  }
-  return value;
-}
-
-function traverseBlockRefs(value, blocks, visited, order) {
-  if (typeof value === "string") {
-    if (blocks[value] && !visited.has(value)) {
-      traverseBlock(value, blocks, visited, order);
-    }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) traverseBlockRefs(item, blocks, visited, order);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const key of Object.keys(value)) traverseBlockRefs(value[key], blocks, visited, order);
-  }
-}
-
-function traverseBlock(blockId, blocks, visited, order) {
-  if (!blockId || visited.has(blockId) || !blocks[blockId]) return;
-  visited.add(blockId);
-  order.push(blockId);
-  const block = blocks[blockId];
-  if (block.next) traverseBlock(block.next, blocks, visited, order);
-  if (block.inputs && typeof block.inputs === "object") {
-    traverseBlockRefs(block.inputs, blocks, visited, order);
-  }
-  if (block.fields && typeof block.fields === "object") {
-    traverseBlockRefs(block.fields, blocks, visited, order);
-  }
-}
-
-function remapBlockIds(blocksObj) {
-  const blocks = blocksObj.blocks || {};
-  const visited = new Set();
-  const order = [];
-
-  if (Array.isArray(blocksObj.scripts)) {
-    for (const script of blocksObj.scripts) {
-      if (Array.isArray(script)) {
-        for (const item of script) {
-          if (typeof item === "string" && blocks[item]) {
-            traverseBlock(item, blocks, visited, order);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  for (const blockId of Object.keys(blocks)) {
-    if (!visited.has(blockId)) {
-      traverseBlock(blockId, blocks, visited, order);
-    }
-  }
-
-  const counts = {};
-  const idMap = {};
-  for (const oldId of order) {
-    const opcode = (blocks[oldId] && blocks[oldId].opcode) || "block";
-    const base = String(opcode).replace(/[^A-Za-z0-9_]/g, "_");
-    counts[base] = (counts[base] || 0) + 1;
-    idMap[oldId] = `${base}${counts[base]}`;
-  }
-
-  const remappedBlocks = {};
-  for (const oldId of order) {
-    const newId = idMap[oldId];
-    const block = blocks[oldId];
-    const remappedBlock = {
-      ...block,
-      id: newId,
-      next: block.next && idMap[block.next] ? idMap[block.next] : block.next,
-      parent: block.parent && idMap[block.parent] ? idMap[block.parent] : block.parent,
-    };
-
-    if (remappedBlock.inputs && typeof remappedBlock.inputs === "object") {
-      remappedBlock.inputs = remapBlockRefsInValue(remappedBlock.inputs, idMap);
-    }
-    if (remappedBlock.fields && typeof remappedBlock.fields === "object") {
-      remappedBlock.fields = remapBlockRefsInValue(remappedBlock.fields, idMap);
-    }
-
-    remappedBlocks[newId] = remappedBlock;
-  }
-
-  const remappedScripts = Array.isArray(blocksObj.scripts)
-    ? blocksObj.scripts.map((script) => remapBlockRefsInValue(script, idMap))
-    : blocksObj.scripts;
-
-  return {
-    blocks: remappedBlocks,
-    scripts: remappedScripts,
-    idMap,
-  };
-}
-
-function remapCommentBlockIds(comments, idMap) {
-  if (!comments || typeof comments !== "object" || Array.isArray(comments)) return {};
-  const remapped = {};
-  for (const [commentId, comment] of Object.entries(comments)) {
-    const remappedComment = { ...comment };
-    if (typeof remappedComment.blockId === "string") {
-      remappedComment.blockId = idMap[remappedComment.blockId] || remappedComment.blockId;
-    }
-    remapped[commentId] = remappedComment;
-  }
-  return remapped;
-}
-
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm) {
   //1. Clear existing contents of the folder except for .git
@@ -296,19 +121,14 @@ async function exportProject(vm) {
     const name = sprite.name;
 
     // 3. Create folder for this sprite
-    const spriteFolder = await getOrCreateDir(root, name);
+    const spriteFolder = await root.getDirectoryHandle(name, { create: true });
 
     //
     // === BLOCKS ===
     //
-    const { blocks: remappedBlocks, scripts: remappedScripts, idMap } = remapBlockIds({
+    const blocksObj = {
       blocks: sprite.blocks._blocks,
       scripts: sprite.blocks._scripts,
-    });
-
-    const blocksObj = {
-      blocks: remappedBlocks,
-      scripts: remappedScripts,
     };
 
     const blocksFile = await spriteFolder.getFileHandle("blocks.json", {
@@ -319,43 +139,6 @@ async function exportProject(vm) {
       normalizeLineEndingsCRLF(JSON.stringify(blocksObj, null, 2)),
     );
     await blocksWritable.close();
-
-    //
-    // === COMMENTS ===
-    //
-    const commentsObj = remapCommentBlockIds(target.comments || sprite.comments || {}, idMap);
-    const commentsFile = await spriteFolder.getFileHandle("comments.json", {
-      create: true,
-    });
-    const commentsWritable = await commentsFile.createWritable();
-    await commentsWritable.write(
-      normalizeLineEndingsCRLF(JSON.stringify(commentsObj, null, 2)),
-    );
-    await commentsWritable.close();
-
-    // === BROADCASTS ===
-    const broadcastsObj = normalizeBroadcastMap(target.broadcasts || sprite.broadcasts || {});
-    const broadcastsFile = await spriteFolder.getFileHandle("broadcasts.json", {
-      create: true,
-    });
-    const broadcastsWritable = await broadcastsFile.createWritable();
-    await broadcastsWritable.write(
-      normalizeLineEndingsCRLF(JSON.stringify(broadcastsObj, null, 2)),
-    );
-    await broadcastsWritable.close();
-
-    //
-    // === VARIABLES ===
-    //
-    const variablesObj = normalizeVariableMap(target.variables || sprite.variables || {}, broadcastsObj);
-    const variablesFile = await spriteFolder.getFileHandle("variables.json", {
-      create: true,
-    });
-    const variablesWritable = await variablesFile.createWritable();
-    await variablesWritable.write(
-      normalizeLineEndingsCRLF(JSON.stringify(variablesObj, null, 2)),
-    );
-    await variablesWritable.close();
 
     //
     // === COSTUMES ===
@@ -689,99 +472,6 @@ async function compileToSB3() {
       );
       const { blocks, scripts } = JSON.parse(blocksText);
 
-      let comments = {};
-      try {
-        const commentsFileHandle = await getFileIfExists(spriteDir, "comments.json");
-        if (commentsFileHandle) {
-          const commentsFile = await commentsFileHandle.getFile();
-          const commentsText = await commentsFile.text();
-          const parsedComments = JSON.parse(commentsText);
-          if (parsedComments && typeof parsedComments === "object" && !Array.isArray(parsedComments)) {
-            comments = parsedComments;
-          } else {
-            throw new Error("comments.json must contain an object");
-          }
-        }
-      } catch (err) {
-        console.warn(
-          `[TurboGit] failed to load comments.json for ${spriteName}, using empty comments`,
-          err,
-        );
-        comments = {};
-      }
-
-      let variables = {};
-      try {
-        const variablesFileHandle = await getFileIfExists(
-          spriteDir,
-          "variables.json",
-        );
-        if (variablesFileHandle) {
-          const variablesFile = await variablesFileHandle.getFile();
-          const variablesText = await variablesFile.text();
-          const parsedVariables = JSON.parse(variablesText);
-          if (parsedVariables && typeof parsedVariables === "object" && !Array.isArray(parsedVariables)) {
-            for (const [varId, varValue] of Object.entries(parsedVariables)) {
-              if (Array.isArray(varValue) && varValue.length >= 2) {
-                variables[varId] = [String(varValue[0]), varValue[1]];
-                continue;
-              }
-
-              if (varValue && typeof varValue === "object") {
-                variables[varId] = [
-                  String(varValue.name ?? varValue.id ?? varId),
-                  varValue.value ?? 0,
-                ];
-                continue;
-              }
-
-              if (typeof varValue === "string" || typeof varValue === "number" || typeof varValue === "boolean") {
-                variables[varId] = [String(varId), varValue];
-                continue;
-              }
-
-              console.warn(
-                `[TurboGit] unsupported variable entry for ${spriteName}:${varId}`,
-                varValue,
-              );
-              variables[varId] = [String(varId), null];
-            }
-          } else {
-            throw new Error("variables.json must contain an object");
-          }
-        }
-      } catch (err) {
-        console.warn(
-          `[TurboGit] failed to load variables.json for ${spriteName}, using empty variables`,
-          err,
-        );
-        variables = {};
-      }
-
-      let broadcasts = {};
-      try {
-        const broadcastsFileHandle = await getFileIfExists(
-          spriteDir,
-          "broadcasts.json",
-        );
-        if (broadcastsFileHandle) {
-          const broadcastsFile = await broadcastsFileHandle.getFile();
-          const broadcastsText = await broadcastsFile.text();
-          const parsedBroadcasts = JSON.parse(broadcastsText);
-          if (parsedBroadcasts && typeof parsedBroadcasts === "object" && !Array.isArray(parsedBroadcasts)) {
-            broadcasts = parsedBroadcasts;
-          } else {
-            throw new Error("broadcasts.json must contain an object");
-          }
-        }
-      } catch (err) {
-        console.warn(
-          `[TurboGit] failed to load broadcasts.json for ${spriteName}, using empty broadcasts`,
-          err,
-        );
-        broadcasts = {};
-      }
-
       // Normalize block fields before validation and loading.
       try {
         for (const bid of Object.keys(blocks || {})) {
@@ -999,10 +689,10 @@ async function compileToSB3() {
       const target = {
         isStage,
         name: spriteName,
-        variables,
+        variables: {},
         lists: {},
-        broadcasts,
-        comments,
+        broadcasts: {},
+        comments: {},
         blocks,
         costumes,
         sounds,
@@ -1054,7 +744,7 @@ async function compileToSB3() {
 
   // Offer automatic download of the generated SB3
   try {
-    const downloadName = `turbogit-${Date.now()}.sb3`;
+    /*const downloadName = `turbogit-${Date.now()}.sb3`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1064,7 +754,7 @@ async function compileToSB3() {
     a.remove();
     URL.revokeObjectURL(url);
     console.log("[TurboGit] SB3 download initiated:", downloadName);
-    
+    */
     
     // Commented out the automatic download to avoid issues in some browsers, but this can be re-enabled if desired.
   } catch (err) {
@@ -1102,21 +792,11 @@ async function logDirectoryContents(dirHandle, path) {
 
 async function getDirectoryHandleWithDebug(parent, name, path) {
   console.log(`[TurboGit] getDirectoryHandle ${path}`);
-  const encodedName = encodeSafeName(name);
   try {
-    const handle = await parent.getDirectoryHandle(encodedName);
+    const handle = await parent.getDirectoryHandle(name);
     console.log(`[TurboGit] found directory ${path}`);
     return handle;
   } catch (err) {
-    if (encodedName !== name) {
-      try {
-        const handle = await parent.getDirectoryHandle(name);
-        console.log(`[TurboGit] found raw directory ${path}`);
-        return handle;
-      } catch {
-        // fall through
-      }
-    }
     console.error(`[TurboGit] missing directory ${path}`);
     await logDirectoryContents(parent, path);
     throw err;
@@ -1125,21 +805,11 @@ async function getDirectoryHandleWithDebug(parent, name, path) {
 
 async function getFileHandleWithDebug(parent, name, path) {
   console.log(`[TurboGit] getFileHandle ${path}`);
-  const encodedName = encodeSafeName(name);
   try {
-    const handle = await parent.getFileHandle(encodedName);
+    const handle = await parent.getFileHandle(name);
     console.log(`[TurboGit] found file ${path}`);
     return handle;
   } catch (err) {
-    if (encodedName !== name) {
-      try {
-        const handle = await parent.getFileHandle(name);
-        console.log(`[TurboGit] found raw file ${path}`);
-        return handle;
-      } catch {
-        // fall through
-      }
-    }
     console.error(`[TurboGit] missing file ${path}`);
     await logDirectoryContents(parent, path);
     throw err;
@@ -1175,37 +845,21 @@ async function readBinaryFile(dirHandle, name, path = name) {
 }
 
 async function getOrCreateDir(parent, name) {
-  return await parent.getDirectoryHandle(encodeSafeName(name), { create: true });
+  return await parent.getDirectoryHandle(name, { create: true });
 }
 
 async function getDirIfExists(parent, name) {
-  const encodedName = encodeSafeName(name);
   try {
-    return await parent.getDirectoryHandle(encodedName, { create: false });
+    return await parent.getDirectoryHandle(name, { create: false });
   } catch {
-    if (encodedName !== name) {
-      try {
-        return await parent.getDirectoryHandle(name, { create: false });
-      } catch {
-        return null;
-      }
-    }
     return null;
   }
 }
 
 async function getFileIfExists(parent, name) {
-  const encodedName = encodeSafeName(name);
   try {
-    return await parent.getFileHandle(encodedName, { create: false });
+    return await parent.getFileHandle(name, { create: false });
   } catch {
-    if (encodedName !== name) {
-      try {
-        return await parent.getFileHandle(name, { create: false });
-      } catch {
-        return null;
-      }
-    }
     return null;
   }
 }
@@ -1214,7 +868,7 @@ async function listDirs(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "directory") {
-      out.push({ name: decodeSafeName(name), handle });
+      out.push({ name, handle });
     }
   }
   return out;
@@ -1224,21 +878,21 @@ async function listFiles(dirHandle) {
   const out = [];
   for await (const [name, handle] of dirHandle.entries()) {
     if (handle.kind === "file") {
-      out.push({ name: decodeSafeName(name), handle });
+      out.push({ name, handle });
     }
   }
   return out;
 }
 
 async function writeTextFile(dirHandle, name, text) {
-  const fileHandle = await dirHandle.getFileHandle(encodeSafeName(name), { create: true });
+  const fileHandle = await dirHandle.getFileHandle(name, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(text);
   await writable.close();
 }
 
 async function writeBinaryFile(dirHandle, name, uint8Array) {
-  const fileHandle = await dirHandle.getFileHandle(encodeSafeName(name), { create: true });
+  const fileHandle = await dirHandle.getFileHandle(name, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(uint8Array);
   await writable.close();
@@ -1256,37 +910,19 @@ async function deleteDirRecursive(dirHandle) {
 }
 
 async function fileExists(dirHandle, name) {
-  const encodedName = encodeSafeName(name);
   try {
-    await dirHandle.getFileHandle(encodedName);
+    await dirHandle.getFileHandle(name);
     return true;
   } catch {
-    if (encodedName !== name) {
-      try {
-        await dirHandle.getFileHandle(name);
-        return true;
-      } catch {
-        return false;
-      }
-    }
     return false;
   }
 }
 
 async function dirExists(parentHandle, name) {
-  const encodedName = encodeSafeName(name);
   try {
-    await parentHandle.getDirectoryHandle(encodedName);
+    await parentHandle.getDirectoryHandle(name);
     return true;
   } catch {
-    if (encodedName !== name) {
-      try {
-        await parentHandle.getDirectoryHandle(name);
-        return true;
-      } catch {
-        return false;
-      }
-    }
     return false;
   }
 }
