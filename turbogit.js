@@ -52,6 +52,58 @@ function waitForElement(selector) {
   });
 }
 
+function popupCustom(title, html) {
+    ScratchBlocks.prompt("TEMP", "", () => {});
+    const modal = document.querySelector('[class*="prompt_modal-content"]');
+    if (modal) {
+        modal.querySelector('[class*="modal_header-item-title"]').textContent = title;
+        modal.querySelector('[class*="prompt_body"]').innerHTML = html;
+    }
+}
+
+function initExportLogPopup() {
+  popupCustom(
+    "TurboGit export log",
+    `<div id="turbogit-export-progress" style="margin-bottom:12px;font-family:inherit;">
+      <div style="background:#222;border-radius:6px;overflow:hidden;height:16px;">
+        <div id="turbogit-export-progress-bar" style="width:0%;height:100%;background:#2f9dff;transition:width 0.2s ease;"></div>
+      </div>
+      <div id="turbogit-export-progress-text" style="margin-top:6px;font-size:12px;color:#cbd5e1;">Preparing export...</div>
+    </div>
+    <div id="turbogit-export-log" style="max-height:300px;overflow:auto;white-space:pre-wrap;font-family:monospace;background:#111;color:#eee;padding:12px;border-radius:6px;line-height:1.4;"></div>`,
+  );
+  const logEl = document.querySelector("#turbogit-export-log");
+  const progressBarEl = document.querySelector("#turbogit-export-progress-bar");
+  const progressTextEl = document.querySelector("#turbogit-export-progress-text");
+  return {
+    log(text) {
+      if (!logEl) return;
+      logEl.textContent += text + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    },
+    progress(current, total, label) {
+      if (!progressBarEl || !progressTextEl) return;
+      const percent = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+      progressBarEl.style.width = `${percent}%`;
+      progressTextEl.textContent = `${label || "Export progress"}: ${current} / ${total} (${percent}%)`;
+    },
+  };
+}
+
+async function exportProjectWithPopup(vm) {
+  const logger = initExportLogPopup();
+  logger.log("[TurboGit] Starting export...");
+  try {
+    await exportProject(vm, logger);
+    logger.progress(1, 1, "Export complete");
+    logger.log("[TurboGit] Export complete.");
+  } catch (error) {
+    logger.log(`[TurboGit] Export failed: ${error?.message || error}`);
+    logger.progress(0, 1, "Export failed");
+    console.error(error);
+  }
+}
+
 function createUI() {
   if (!document.querySelectorAll('[id*="turbogit"]')[0]) {
     const firstMenuItem = document.querySelectorAll(
@@ -67,7 +119,7 @@ function createUI() {
       button.className = firstMenuItem.className;
       button.addEventListener("click", () => {
         if (text === "Push") {
-          exportProject(vm);
+          exportProjectWithPopup(vm);
         } else if (text === "Pull") {
           compileToSB3();
         }
@@ -101,10 +153,13 @@ function normalizeLineEndingsCRLF(text) {
 }
 
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
-async function exportProject(vm) {
+async function exportProject(vm, logger = { log() {} }) {
+  logger.log("[TurboGit] Clearing export folder...");
+
   //1. Clear existing contents of the folder except for .git
   for await (const [name, handle] of root.entries()) {
     if (name === ".git") continue;
+    logger.log(`[TurboGit] Removing existing entry: ${name}`);
     if (handle.kind === "file") {
       await root.removeEntry(name);
     } else if (handle.kind === "directory") {
@@ -115,10 +170,15 @@ async function exportProject(vm) {
 
   // 2. Get only original sprites (ignore clones)
   const originals = vm.runtime.targets.filter((t) => t.isOriginal);
+  logger.log(`[TurboGit] Found ${originals.length} original sprite(s)`);
+  logger.progress(0, originals.length, "Sprite export progress");
 
-  for (const target of originals) {
+  for (let index = 0; index < originals.length; index++) {
+    const target = originals[index];
     const sprite = target.sprite;
     const name = sprite.name;
+    logger.log(`[TurboGit] Exporting sprite: ${name}`);
+    logger.progress(index + 1, originals.length, `Exporting ${name}`);
 
     // 3. Create folder for this sprite
     const spriteFolder = await root.getDirectoryHandle(name, { create: true });
@@ -126,6 +186,7 @@ async function exportProject(vm) {
     //
     // === BLOCKS ===
     //
+    logger.log(`[TurboGit] Writing blocks.json for ${name}`);
     const blocksObj = {
       blocks: sprite.blocks._blocks,
       scripts: sprite.blocks._scripts,
@@ -244,7 +305,7 @@ async function exportProject(vm) {
   ? vm.extensionManager.workerURLs
   : [];
   
-  console.log("[TurboGit] current extension sources:", extensionSources);
+  logger.log("[TurboGit] current extension sources: " + JSON.stringify(extensionSources));
   
   extensionSources = extensionSources.filter(src => {
     if (typeof src !== "string") return false;
@@ -259,7 +320,7 @@ async function exportProject(vm) {
     return true;
   });
 
-  console.log("[TurboGit] filtered extension sources for export:", extensionSources);
+  logger.log("[TurboGit] filtered extension sources for export: " + JSON.stringify(extensionSources));
 
   const extensionsFile = await root.getFileHandle("extensions.json", {
     create: true,
@@ -270,6 +331,8 @@ async function exportProject(vm) {
   );
   await extensionsWritable.close();
 
+  logger.log("[TurboGit] Wrote extensions.json");
+  logger.log("[TurboGit] Export complete!");
   console.log("Export complete!", {
     extensions: extensionSources,
   });
