@@ -317,8 +317,10 @@ async function exportProject(vm, logger = { log() {} }) {
   let extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
   ? vm.extensionManager.workerURLs
   : [];
+  const extensionStorage = vm?.runtime?.extensionStorage || {};
   
   logger.log("[TurboGit] current extension sources: " + JSON.stringify(extensionSources));
+  logger.log("[TurboGit] current extensionStorage: " + JSON.stringify(extensionStorage));
   
   extensionSources = extensionSources.filter(src => {
     if (typeof src !== "string") return false;
@@ -340,7 +342,16 @@ async function exportProject(vm, logger = { log() {} }) {
   });
   const extensionsWritable = await extensionsFile.createWritable();
   await extensionsWritable.write(
-    normalizeLineEndingsCRLF(JSON.stringify(extensionSources, null, 2)),
+    normalizeLineEndingsCRLF(
+      JSON.stringify(
+        {
+          extensionSources,
+          extensionStorage,
+        },
+        null,
+        2,
+      ),
+    ),
   );
   await extensionsWritable.close();
 
@@ -505,24 +516,41 @@ async function compileToSB3() {
       vm: "0.2.0",
       agent: "custom",
     },
+    extensionStorage: {},
     targets: [],
     monitors: [],
     extensions: [],
   };
 
   let extensionSources = [];
+  let extensionStorage = {};
   try {
     const extensionsFileHandle = await getFileIfExists(root, "extensions.json");
     if (extensionsFileHandle) {
       const file = await extensionsFileHandle.getFile();
       const extensionsText = await file.text();
-      extensionSources = JSON.parse(extensionsText);
-      if (!Array.isArray(extensionSources)) {
+      const parsedExtensionsData = JSON.parse(extensionsText);
+      if (Array.isArray(parsedExtensionsData)) {
+        extensionSources = parsedExtensionsData;
+      } else if (
+        parsedExtensionsData &&
+        typeof parsedExtensionsData === "object"
+      ) {
+        extensionSources = Array.isArray(parsedExtensionsData.extensionSources)
+          ? parsedExtensionsData.extensionSources
+          : [];
+        extensionStorage =
+          parsedExtensionsData.extensionStorage &&
+          typeof parsedExtensionsData.extensionStorage === "object"
+            ? parsedExtensionsData.extensionStorage
+            : {};
+      } else {
         console.warn(
-          "[TurboGit] extensions.json did not contain an array, ignoring",
-          extensionSources,
+          "[TurboGit] extensions.json did not contain an array or object, ignoring",
+          parsedExtensionsData,
         );
         extensionSources = [];
+        extensionStorage = {};
       }
     }
   } catch (err) {
@@ -531,6 +559,8 @@ async function compileToSB3() {
   }
 
   console.log("[TurboGit] loaded extension sources:", extensionSources);
+  console.log("[TurboGit] loaded extension storage:", extensionStorage);
+  project.extensionStorage = extensionStorage;
   // Remove TurboGit extension from list of extensions to export/load
   const filteredExtensionSources = extensionSources.filter(
     (src) =>
