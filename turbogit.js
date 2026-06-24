@@ -816,16 +816,17 @@ async function compileToSB3() {
       //
       const isStage = spriteName === "Stage";
 
-      const { targetVariables, targetBroadcasts } = await loadTargetVariables(
-        spriteDir,
-        spriteName,
-      );
+      const {
+        targetVariables,
+        targetLists,
+        targetBroadcasts,
+      } = await loadTargetVariables(spriteDir, spriteName);
 
       const target = {
         isStage,
         name: spriteName,
         variables: targetVariables,
-        lists: {},
+        lists: targetLists,
         broadcasts: targetBroadcasts,
         comments,
         blocks,
@@ -1061,24 +1062,31 @@ async function loadTargetVariables(spriteDir, spriteName) {
   }
 
   const targetVariables = {};
+  const targetLists = {};
   const targetBroadcasts = {};
 
   for (const [id, item] of Object.entries(parsed)) {
     if (Array.isArray(item)) {
-      targetVariables[id] = [item[0], item[1]];
+      if (Array.isArray(item[1])) {
+        targetLists[id] = [item[0], item[1]];
+      } else {
+        targetVariables[id] = [item[0], item[1]];
+      }
       continue;
     }
 
     if (item && typeof item === "object") {
       if (item.type === "broadcast_msg") {
         targetBroadcasts[id] = item.value ?? item.name;
+      } else if (item.type === "list") {
+        targetLists[id] = [item.name ?? id, Array.isArray(item.value) ? item.value : []];
       } else {
         targetVariables[id] = [item.name ?? id, item.value];
       }
     }
   }
 
-  return { targetVariables, targetBroadcasts };
+  return { targetVariables, targetLists, targetBroadcasts };
 }
 
 async function deleteDirRecursive(dirHandle) {
