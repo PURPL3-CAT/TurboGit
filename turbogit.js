@@ -164,6 +164,141 @@ function decodeFileName(name) {
   }
 }
 
+function normalizeBlockOpcode(opcode) {
+  return String(opcode || "block").replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+function remapBlocksAndComments(blocks, scripts, comments) {
+  const oldToNew = {};
+  const opcodeCounters = {};
+  const newBlocks = {};
+
+  function makeNewId(opcode) {
+    const normalized = normalizeBlockOpcode(opcode);
+    opcodeCounters[normalized] = (opcodeCounters[normalized] || 0) + 1;
+    return `${normalized}${opcodeCounters[normalized]}`;
+  }
+
+  function ensureMapping(oldId) {
+    if (!oldId || oldToNew[oldId]) return oldToNew[oldId];
+    const opcode = blocks[oldId]?.opcode || "block";
+    oldToNew[oldId] = makeNewId(opcode);
+    return oldToNew[oldId];
+  }
+
+  function replaceBlockRef(value) {
+    return typeof value === "string" && oldToNew[value] ? oldToNew[value] : value;
+  }
+
+  function traverseBlock(oldId) {
+    if (!oldId || oldToNew[oldId]) return;
+    if (!blocks[oldId]) return;
+    ensureMapping(oldId);
+    const block = blocks[oldId];
+
+    if (typeof block.next === "string") traverseBlock(block.next);
+    if (typeof block.parent === "string") traverseBlock(block.parent);
+
+    if (block.inputs && typeof block.inputs === "object") {
+      for (const input of Object.values(block.inputs)) {
+        if (!input || typeof input !== "object") continue;
+        if (typeof input.block === "string") traverseBlock(input.block);
+        if (typeof input.shadow === "string") traverseBlock(input.shadow);
+      }
+    }
+
+    if (block.fields && typeof block.fields === "object") {
+      for (const field of Object.values(block.fields)) {
+        if (field && typeof field === "object" && typeof field.id === "string") {
+          if (blocks[field.id]) traverseBlock(field.id);
+        }
+      }
+    }
+  }
+
+  function traverseStructureForBlocks(value) {
+    if (typeof value === "string") {
+      if (blocks[value]) traverseBlock(value);
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(traverseStructureForBlocks);
+    if (value && typeof value === "object") {
+      const result = {};
+      for (const [key, entry] of Object.entries(value)) {
+        result[key] = traverseStructureForBlocks(entry);
+      }
+      return result;
+    }
+    return value;
+  }
+
+  traverseStructureForBlocks(scripts);
+
+  for (const oldId of Object.keys(blocks)) {
+    if (!oldToNew[oldId]) traverseBlock(oldId);
+  }
+
+  for (const [oldId, block] of Object.entries(blocks)) {
+    const newId = ensureMapping(oldId);
+    const updatedBlock = { ...block, id: newId };
+
+    if (typeof updatedBlock.next === "string") {
+      updatedBlock.next = replaceBlockRef(updatedBlock.next);
+    }
+    if (typeof updatedBlock.parent === "string") {
+      updatedBlock.parent = replaceBlockRef(updatedBlock.parent);
+    }
+
+    if (updatedBlock.inputs && typeof updatedBlock.inputs === "object") {
+      for (const input of Object.values(updatedBlock.inputs)) {
+        if (!input || typeof input !== "object") continue;
+        if (typeof input.block === "string") {
+          input.block = replaceBlockRef(input.block);
+        }
+        if (typeof input.shadow === "string") {
+          input.shadow = replaceBlockRef(input.shadow);
+        }
+      }
+    }
+
+    if (updatedBlock.fields && typeof updatedBlock.fields === "object") {
+      for (const field of Object.values(updatedBlock.fields)) {
+        if (field && typeof field === "object" && typeof field.id === "string") {
+          field.id = replaceBlockRef(field.id);
+        }
+      }
+    }
+
+    newBlocks[newId] = updatedBlock;
+  }
+
+  function replaceRefsInStructure(value) {
+    if (typeof value === "string") {
+      return replaceBlockRef(value);
+    }
+    if (Array.isArray(value)) return value.map(replaceRefsInStructure);
+    if (value && typeof value === "object") {
+      const result = {};
+      for (const [key, entry] of Object.entries(value)) {
+        result[key] = replaceRefsInStructure(entry);
+      }
+      return result;
+    }
+    return value;
+  }
+
+  const newScripts = replaceRefsInStructure(scripts);
+  const newComments = JSON.parse(JSON.stringify(comments || {}));
+
+  for (const comment of Object.values(newComments)) {
+    if (comment && typeof comment === "object" && typeof comment.blockId === "string") {
+      comment.blockId = replaceBlockRef(comment.blockId);
+    }
+  }
+
+  return { blocks: newBlocks, scripts: newScripts, comments: newComments };
+}
+
 //exportProject(vm) - Exports all original sprites from the VM to the selected folder
 async function exportProject(vm, logger = { log() {} }) {
   logger.log("[TurboGit] Clearing export folder...");
@@ -200,9 +335,13 @@ async function exportProject(vm, logger = { log() {} }) {
     // === BLOCKS ===
     //
     logger.log(`[TurboGit] Writing blocks.json for ${name}`);
+    const commentsObj = target.comments || sprite.comments || {};
+    const { blocks: remappedBlocks, scripts: remappedScripts, comments: remappedComments } =
+      remapBlocksAndComments(sprite.blocks._blocks, sprite.blocks._scripts, commentsObj);
+
     const blocksObj = {
-      blocks: sprite.blocks._blocks,
-      scripts: sprite.blocks._scripts,
+      blocks: remappedBlocks,
+      scripts: remappedScripts,
     };
 
     const blocksFile = await spriteFolder.getFileHandle("blocks.json", {
@@ -227,13 +366,12 @@ async function exportProject(vm, logger = { log() {} }) {
     );
     await variablesWritable.close();
 
-    const commentsObj = target.comments || sprite.comments || {};
     const commentsFile = await spriteFolder.getFileHandle("comments.json", {
       create: true,
     });
     const commentsWritable = await commentsFile.createWritable();
     await commentsWritable.write(
-      normalizeLineEndingsCRLF(JSON.stringify(commentsObj, null, 2)),
+      normalizeLineEndingsCRLF(JSON.stringify(remappedComments, null, 2)),
     );
     await commentsWritable.close();
 
