@@ -86,6 +86,14 @@ function initExportLogPopup() {
       const percent = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
       progressBarEl.style.width = `${percent}%`;
       progressTextEl.textContent = `${label || "Export progress"}: ${current} / ${total} (${percent}%)`;
+      if (percent === 100) {
+        setTimeout(() => {
+          const closeButton = document.querySelector('[class*=close-button]');
+          if (closeButton && typeof closeButton.click === "function") {
+            closeButton.click();
+          }
+        }, 1000);
+      }
     },
   };
 }
