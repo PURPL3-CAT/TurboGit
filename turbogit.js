@@ -460,30 +460,17 @@ async function exportProject(vm, logger = { log() {} }) {
     await soundMetaWritable.close();
   }
 
-  let extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
-  ? vm.extensionManager.workerURLs
-  : [];
+  const extensionSources = Array.isArray(vm?.extensionManager?.workerURLs)
+    ? vm.extensionManager.workerURLs
+    : [];
   const extensionStorage = vm?.runtime?.extensionStorage || {};
-  
+
   logger.log("[TurboGit] current extension sources: " + JSON.stringify(extensionSources));
   logger.log("[TurboGit] current extensionStorage: " + JSON.stringify(extensionStorage));
-  
-  extensionSources = extensionSources.filter(src => {
-    if (typeof src !== "string") return false;
-    const s = src.toLowerCase();
-    // Remove TurboGit in any form
-    if (s.includes("turbogit")) return false;
-    if (s.includes("vhvyrm9hit")) return false; // Base64 TurboGit
-    // Remove data URLs (TurboGit inline)
-    // if (s.startsWith("data:")) return false;
-    // Remove blob URLs (TurboGit worker)
-    // if (s.startsWith("blob:")) return false;
-    return true;
-  });
 
   extensionSources.sort((a, b) => a.length - b.length);
 
-  logger.log("[TurboGit] filtered extension sources for export: " + JSON.stringify(extensionSources));
+  logger.log("[TurboGit] extension sources for export: " + JSON.stringify(extensionSources));
 
   const extensionsFile = await root.getFileHandle("extensions.json", {
     create: true,
@@ -709,24 +696,15 @@ async function compileToSB3() {
   console.log("[TurboGit] loaded extension sources:", extensionSources);
   console.log("[TurboGit] loaded extension storage:", extensionStorage);
   project.extensionStorage = extensionStorage;
-  // Remove TurboGit extension from list of extensions to export/load
-  const filteredExtensionSources = extensionSources.filter(
-    (src) =>
-      typeof src === "string" &&
-      !src.toLowerCase().includes("vhvyrm9hit") &&
-      !src.toLowerCase().includes("turbogit"),
-  );
 
-  filteredExtensionSources.forEach((src) => {
+  extensionSources.forEach((src) => {
+    if (typeof src !== "string") return;
     if (!vm.extensionManager.workerURLs.includes(src)) {
       vm.extensionManager.loadExtensionURL(src);
     }
   });
 
-  console.log(
-    "[TurboGit] filtered extension sources:",
-    filteredExtensionSources,
-  );
+  console.log("[TurboGit] extension sources:", extensionSources);
   console.log(
     "[TurboGit] vm.extensionManager.workerURLs:",
     vm?.extensionManager?.workerURLs,
